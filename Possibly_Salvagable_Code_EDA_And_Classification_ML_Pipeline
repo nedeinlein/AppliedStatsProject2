@@ -1,0 +1,395 @@
+## Simple ML classification Template 
+
+library(readxl)
+library(caret)
+library(dplyr)
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#          Data Setup             #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+df <- read_excel("C:/Users/jmush/OneDrive/Desktop/Masters Degree/DS6036 - Doing Data Science/Case_Study_2/cs2_data.xlsx")
+# Remove 2 useless variables - They have no unique values
+df$EmployeeCount <- NULL
+df$StandardHours <- NULL
+# Create a df without categoricals for PCA
+df_pca <- df[ -grep("ID|Attrition|BusinessTravel|Department|EducationField|Gender|JobRole|MaritalStatus|Over18|OverTime", 
+                    names(df), ignore.case = T) ]
+
+# Summarize the data
+summary(df)
+  # Dummy-fy all binary categoricals
+unique(df$Attrition); unique(df$Gender)
+df$Attrition <- ifelse(df$Attrition == "Yes", 1, 0)
+df$Gender <- ifelse(df$Gender == "Male", 1, 0)
+df$Over18 <- ifelse(df$Over18 == "Y", 1, 0)
+  # One hot encode all of the non binary variables
+dmy <- dummyVars("~.", data = df)
+df <- data.frame(predict(dmy, newdata = df)); rm(dmy) # Delete Dmy after
+
+# Make the Salary variable
+df$Salary <- df$MonthlyIncome * 12
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#               EDA               #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+## This will help us see which columns are good candidates for imputation
+library(reshape2)
+make_plots <- function(df, plottype = "box", histo_var = NULL){
+  if (plottype == "box"){
+    melted_df <- melt(df)
+    ggplot(data = melted_df, aes(x=variable, y = value)) +
+      geom_boxplot(color='blue')
+  }
+  else {
+    ggplot(data = df, aes(x=histo_var)) + geom_histogram() + xlab("X-variable")
+  }
+}
+
+## Running the boxplots of each variable to check variance
+make_plots(df = df[c('DailyRate', 'HourlyRate')], 
+           plottype = "box")
+
+
+## Imputation with sample taken from range of 1SD of the mean
+## Defining the imputation function --> 
+## generate values within 1SD of the variable mean to impute
+imputation_1sd <- function(colname){
+  ifelse(is.na(colname),
+         round(sample((mean(colname, na.rm = TRUE) - 
+                         sd(colname, na.rm = TRUE)):
+                        (mean(colname, na.rm = TRUE) -
+                           sd(colname, na.rm = TRUE)),
+                      size = sum(is.na(colname)), replace = T),0), colname)
+}
+## Example functionality
+df$DailyRate <- imputation_1sd(df$DailyRate)
+
+
+## Corrplot
+## Example functionality
+library(corrplot)
+library(Hmisc)
+cor_mat <- rcorr(as.matrix(df[c('DailyRate','Salary','HourlyRate')]), type="pearson")
+corrplot(cor_mat$r, type="lower", p.mat = cor_mat$P, 
+         sig.level = 0.05, insig="blank")
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#               PCA               #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# Convert to numeric in case
+# lapply(df_pca, FUN = function(x) as.numeric(x))
+# # Check if there are any non finites and NAs
+# sapply(df_pca,FUN = function(x) all(is.finite(x)))
+# sapply(df_pca, FUN = function(x) all(!is.na(x)))
+
+# PCA  function
+run_pca <- function(df, scale_data = TRUE){
+  if(scale_data) {
+    # Scale
+    df = as.data.frame(scale(df))
+  }
+    # Run the PCA
+    pca <- princomp(df)
+    screeplot(pca)
+    return(pca$loadings)
+  }
+
+run_pca(df_pca, scale_data = TRUE)
+
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#                                Classification Portion                                  #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#       No Skill Benchmark        #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# We want our model to predict better than if we just predict the majority class
+  # Otherwise what is the point of predicting if we can't beat predicting all zeroes?
+print(paste0("Majority class is: ", 
+(as.data.frame(table(df$Attrition))[as.data.frame(table(df$Attrition))$Freq == max(as.data.frame(table(df$Attrition))$Freq), ])$Var1,
+" With ",
+round(100*(as.data.frame(table(df$Attrition))[as.data.frame(table(df$Attrition))$Freq == max(as.data.frame(table(df$Attrition))$Freq), ])$Freq/
+  sum(as.data.frame(table(df$Attrition))$Freq),2),
+"% of the sample"))
+
+## Make and append to acc df our no skill accuracy
+acc_df <- append(c(), round(100*(as.data.frame(table(df$Attrition))[as.data.frame(table(df$Attrition))$Freq == max(as.data.frame(table(df$Attrition))$Freq), ])$Freq/
+                              sum(as.data.frame(table(df$Attrition))$Freq),2))
+model_df <- append(c(), "No Skill")
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#       Upsample the Data!        #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+minority_class <- (as.data.frame(table(df$Attrition))[as.data.frame(table(df$Attrition))$Freq == min(as.data.frame(table(df$Attrition))$Freq), ])$Var1
+majority_class <- (as.data.frame(table(df$Attrition))[as.data.frame(table(df$Attrition))$Freq == max(as.data.frame(table(df$Attrition))$Freq), ])$Var1
+upsample_df <- df %>% filter(Attrition == minority_class)
+percent_of_original <- 0.95
+num_records_needed <- as.integer(percent_of_original * nrow(df %>% filter(Attrition == majority_class))) - nrow(df %>% filter(Attrition == minority_class))
+outpt_df <- data.frame()
+for(i in seq(from = 1, to = num_records_needed, by = 1)){
+  outpt_df <- rbind(outpt_df, upsample_df[sample(nrow(upsample_df), 1), ])
+}
+df <- rbind(df, outpt_df)
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#    Split the data and build the models     #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+## Part 9 - Make train / test
+set.seed(2021)
+train_idx <- sample(1:nrow(df), as.integer(0.8*(nrow(df))) )
+train <- df[train_idx, ]
+test <- df[-train_idx, ]
+
+# Establish the formula
+f = as.formula(as.factor(Attrition) ~ Age*TotalWorkingYears + JobLevel + MonthlyIncome + 
+                 YearsAtCompany*YearsInCurrentRole + YearsSinceLastPromotion +
+                 YearsWithCurrManager)
+
+cl = train$Attrition
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#         Baseline - KNN          #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+library(class)
+
+## Part 8
+test_models <- function(train, test, validation_colname, cl, k_start, k_end, test_df){
+  model_num <- c()
+  acc <- c()
+  for(k in k_start:k_end){
+    knn_model <- knn(train = train, test = test,  cl = cl, k = k, prob = TRUE)
+    model_acc <- 100 * sum(test[[validation_colname]] == knn_model)/NROW(test[[validation_colname]])
+    
+    model_num <- append(model_num, k)
+    acc <- append(acc, model_acc)
+  }
+  model_eval <- data.frame("Num_Neighbors" = model_num,
+                           "Accuracy" = acc)
+  return(model_eval)
+}
+
+# Plotting accuracy
+model_eval <- test_models(train = train, test = test, validation_colname = "Attrition",
+            cl = cl, k_start = 2, k_end = 50, test_df = test)
+
+model_eval %>%  ggplot(aes(x=Num_Neighbors, y = Accuracy))  + geom_point() + ggtitle("Accuracy AAFO Neighbors (k)")
+
+# Making optimal model
+knn_model <- knn(train = train, test = test, 
+                      cl = cl,
+                      k = model_eval[model_eval$Accuracy == max(model_eval$Accuracy), ][[1]][1], 
+                      prob = FALSE)
+
+# Showing the confusion Matrix 
+paste0("Confusion Matrix of Attrition Classification")
+confusionMatrix(table(knn_model, test$Attrition))
+
+## append to accuracy df the KNN Accuracy
+acc_df <- append(acc_df, round(sum(knn_model == test$Attrition) / length(test$Attrition),2)*100)
+model_df <- append(model_df, "KNN")
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#           Logistic Regression              #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# Building the model
+logit <- glm(f, data = train, family = "binomial", maxit = 100) 
+
+# Plotting the actuals vs. predicted values
+logit_pred <- predict(logit, test)
+
+test_logit <- function(logit_pred, test, test_range = seq(from = 0.25, to = 0.65, by = 0.05)){
+  logit_acc <- c()
+  cutoff <- c()
+  for(k in test_range){
+    pred_binary <- ifelse(logit_pred > k, 1, 0)
+    # Append to the vectors
+    logit_acc <- append(logit_acc, sum(pred_binary == test$Attrition) / length(test$Attrition))
+    cutoff <- append(cutoff, k)
+  }
+  return(data.frame(logit_acc = logit_acc, cutoff = cutoff))
+}
+
+
+## Test the cutoffs
+logit_testing_df <- test_logit(logit_pred = logit_pred, 
+           test = test, 
+           test_range = seq(from = 0.10, t = 0.65, by = 0.01))
+
+## Plot the accuracy by Cutoff
+logit_testing_df %>%
+  ggplot(aes(x=cutoff, y = logit_acc))  + geom_point() + ggtitle("Accuracy AAFO Cutoff")
+
+## Optimal cutoff
+binarized_logit_pred <- ifelse(logit_pred >= logit_testing_df$cutoff[which.max(logit_testing_df$logit_acc)], 1, 0) 
+
+# Accuracy appending
+acc_df <- append(acc_df, round(sum(binarized_logit_pred == test$Attrition) / length(test$Attrition),2)*100 )
+model_df <- append(model_df, "Logit")
+
+
+# Showing the confusion Matrix 
+paste0("Confusion Matrix of Attrition Classification")
+confusionMatrix(table(binarized_logit_pred, test$Attrition))
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#                Random Forest               #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# Testing a randomforest model!
+library(randomForest)
+
+compare_trees <- function(rng){
+  acc <- c()
+  ntree <- c()
+  
+  for (i in rng){
+    rf_regressor = randomForest(f,data = train, ntree = i)
+    test$yhat <- predict(rf_regressor, test)
+    acc <- append(acc, sum(test$yhat == test$Attrition) / nrow(test))
+    ntree <- append(ntree, i)  
+  }
+  
+  return(data.frame(acc = acc, ntree = ntree))
+}
+
+# Timing this run for future tests
+system.time(trees <- compare_trees(50:250))
+
+# Train the model
+rf_regressor <- randomForest(f,data = train, ntree = trees[which.min(trees$acc), ]$ntree)
+
+# Predict and plot the predictions
+rf_pred <- predict(rf_regressor, test)
+
+# Showing the confusion Matrix 
+confusionMatrix(table(rf_pred, test$Attrition))
+
+# Cross validation of our dataset .How does it compare with our one-hoc RMSE?
+library(rfUtilities)
+rf.crossValidation(x = rf_regressor, xdata = train, 
+                   trace = TRUE, n = 10, bootstrap = TRUE,
+                   seed = 2021)
+
+# Accuracy appending
+acc_df <- append(acc_df, round(sum(rf_pred == test$Attrition) / length(test$Attrition),2)*100 )
+model_df <- append(model_df, "Random Forest")
+
+# Showing the confusion Matrix 
+paste0("Confusion Matrix of Attrition Classification")
+confusionMatrix(table(rf_pred, test$Attrition))
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#         Finalize the Accuracy Df           #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+data.frame(accuracy = acc_df, model = model_df)
+
+
+
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#                                Regression Portion                                      #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#       No Skill Benchmark        #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# We want our model to predict better than if we just predict the mean salary for everyone
+# Otherwise what is the point of predicting if we can't beat predicting all means?
+salary_model_comparisons = data.frame(y = test$Salary, noskill = mean(df$Salary))
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#   Multiple Linear Regression    #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+model_1 = lm(Salary ~ Age*TotalWorkingYears + JobLevel +  
+                 YearsAtCompany*YearsInCurrentRole + YearsSinceLastPromotion
+                 , data = train)
+
+model_2 = lm(Salary ~ Age + TotalWorkingYears + JobLevel + 
+                       YearsAtCompany*YearsInCurrentRole + YearsSinceLastPromotion +
+                       YearsWithCurrManager, data = train)
+
+### Testing several models
+list_of_models <- paste0("model_",1:2)
+## Method to compare models
+model_compare <- function(list_of_models, test, dependent_var = "Salary"){
+  mdl_name <- c()
+  rmse_list <- c()
+  mse_list <- c()
+  mdl_cntr <- 1
+  for(model in list_of_models){
+    ## Predictions
+    test$yhat <- c(predict(get(model), test))
+    ## RMSE
+    test$rmse <- (((test[[dependent_var]] - test$yhat)^2)^0.5)
+    test$rmse <- test$rmse / length(which(!is.na(test$rmse)))
+    test$mse <- (test$rmse)^2
+    
+    rmse_list <- append(rmse_list, sum(test$rmse, na.rm = TRUE))
+    mse_list <- append(mse_list, sum(test$mse, na.rm = TRUE))
+    mdl_name <- append(mdl_name, as.character(mdl_cntr))
+    mdl_cntr <- mdl_cntr + 1
+  }
+  return(data.frame(rmse_list, mse_list, mdl_name))
+}
+
+## Create the comparison DF
+comparison_df <- model_compare(list_of_models, test = test, dependent_var = "Salary")
+
+## Print the optimal model and its RMSE / MSE
+print("Optimal Model and RMSE/MSE:")
+comparison_df[comparison_df$mse_list == min(comparison_df$mse_list), ]
+
+## Quick peek into what we're actually predicting
+data.frame(actuals = test$Salary, mlr_pred = predict(model_2, test))
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#           Random Forest         #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+## Fitting a RF to test our fit
+library(randomForest)
+
+##  "Best" model by ntrees
+compare_trees <- function(rng, test, dependent_var = "Salary"){
+  
+  ## Instantiate our output vectors
+  mse <- c()
+  rmse <- c()
+  ntree <- c()
+  
+  ## Make the model
+  rf_regressor = randomForest(Salary ~ Age + TotalWorkingYears + JobLevel + 
+  YearsAtCompany*YearsInCurrentRole + YearsSinceLastPromotion + YearsWithCurrManager, data = train, ntree = i)
+  
+  ## Calculate RMSE / MSE for each number of trees
+  for (i in rng){
+
+    test$yhat <- predict(rf_regressor, test)
+    test$rmse <- (((test[["dependent_var"]] - test$yhat)^2)^0.5)
+    test$mse <- test$rmse^2
+    
+    rmse <- append(rmse, sum(test$rmse / length(which(!is.na(test$rmse)))))
+    mse <- append(mse, sum(test$mse / length(which(!is.na(test$mse)))))
+    ntree <- append(ntree, i)
+  }
+  
+  ## Final data frame & Plot the error rates by tree #'s
+  rf_comparison_df <- data.frame(rmse = rmse, mse = mse, ntree = ntree)
+  
+  print(rf_comparison_df %>% ggplot(aes(x=ntree, y = mse)) + geom_point() 
+        + ggtitle("MSE By Number of Trees") +
+          geom_smooth(method = 'lm', se = TRUE))
+  
+  ## output our DF
+  return(rf_comparison_df)
+}
+
+
+
+rf_comparison_df <- compare_trees(50:55)
+
+print("Optimal Model and RMSE/MSE:")
+rf_comparison_df[rf_comparison_df$mse == min(rf_comparison_df$mse), ]
