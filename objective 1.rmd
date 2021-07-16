@@ -1,0 +1,20 @@
+---
+title: "objective 1"
+author: "Joseph Lazarus"
+date: "7/15/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(caret)
+library(dplyr)
+```
+```{r}
+
+```
+
