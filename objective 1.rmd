@@ -13,8 +13,186 @@ knitr::opts_chunk$set(echo = TRUE)
 library(readxl)
 library(caret)
 library(dplyr)
+library(skimr)
 ```
+
+
 ```{r}
+df <- read.csv("https://raw.githubusercontent.com/nedeinlein/AppliedStatsProject2/main/data_folder/adult.data.csv", strip.white = TRUE)
+
+head(df)
+
+# change  " ?" to NA
+df <- na_if(df,"?")
+
+#check work
+colSums(is.na(df))
+
+str(df)
+
+#target column is income. Well call it a hit if income is ">50K" and assigning it a 1 else 0 this will help match the logit probabilites. Also no NA's in income so this should work. 
+df$income <- ifelse(df$income == ">50K",1,0)
+df$income <- as.factor(df$income)
+
+#convert the remaining character columns to factors the lazy way.
+df[sapply(df,is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
+
+str(df)
+
+
+#reorder dataframe 
+
+df <- df %>% select(income, age, fnlwgt, education.num, capital.gain, capital.loss, hours.per.week, workclass, education, marital.status, occupation, relationship, race, sex, native.country)
+```
+
+```{r}
+library(GGally)
+ggpairs(df[, 1:7], aes(color = income, alpha = 0.4))
+
+
+ggcorr(df[, 1:7])
+```
+
+```{r}
+# variables i like: capital.gain, capital.loss, education.num, hours.per.week, age
+
+#remove NA values
+df <- na.omit(df)
+
+## Part 9 - Make train / test
+set.seed(2021)
+train_idx <- sample(1:nrow(df), as.integer(0.8*(nrow(df))) )
+train <- df[train_idx, ]
+test <- df[-train_idx, ]
 
 ```
+
+```{r}
+set.seed(5)
+
+model <- glm(income ~  capital.gain + capital.loss + education.num + hours.per.week + age + fnlwgt, binomial(link = 'logit'), data = train)
+
+summary(model)
+
+train$incomeProbability <- predict(model, newdata = train, type = "response")
+
+#make prediction column to store the probabilities
+train["Prediction"] = 0
+
+#set cutoff at 0.5 so that if probab
+train$Prediction[train$incomeProbability>0.5] = 1
+
+#for confusion matrix to work assign factors levels to prediction & income cols
+train$Prediction = as.factor(train$Prediction)
+train$income = as.factor(train$income)
+
+# predicted classes, Reference
+confusionMatrix(train$Prediction, train$income)
+#accuracy 82%
+#sensitivity 94%
+#specificty 40% 
+
+# atsah no good!
+
+# we need to make it harder to be classified
+
+test$incomeProbability <- predict(model, newdata = test, type = "response")
+
+test["Prediction"] = 0
+test$Prediction[test$incomeProbability>0.5] = 1
+test$Prediction=as.factor(test$Prediction)
+test$income=as.factor(test$income)
+
+# predicted classes, Reference
+confusionMatrix(test$Prediction, test$income)
+#Accuracy 80%
+#sensitivity 94%
+#specificity 38%
+
+#not really good. our model is only passable because of the lopsided observations in the 0. we could lower the income probability at the sacrifice of specificty. But whats really going on is a an strong overlap between probabilites dist from our current predictors. Lets try and use LASSO and PCA to help get better predictors. 
+```
+
+
+```{r}
+#reset train and test 
+train <- df[train_idx, ]
+test <- df[-train_idx, ]
+
+
+
+X <- model.matrix(income~ capital.gain + capital.loss + education.num + hours.per.week + age + fnlwgt,train)[,-1]
+
+y <- train$income
+
+xTest <- model.matrix(income~ capital.gain + capital.loss + education.num + hours.per.week + age + fnlwgt,test)[,-1]
+
+yTest <- test$income
+
+lambdaGrid = 10^seq(10,-2, length =100)
+
+Lasso<-train(y = y,
+             x = X,
+             method = 'glmnet',
+             tuneGrid = expand.grid(alpha = 1, lambda = lambdaGrid),
+             na.action = na.omit
+             )
+
+Lasso.pred <- Lasso %>% predict(xTest)
+
+Lasso_RMSE = RMSE(Lasso.pred, yTest)
+Lasso_RMSE
+
+Lasso.test <-postResample(pred = Lasso.pred, obs = test$income)
+Lasso.test
+
+coef(Lasso$finalMode,Lasso$finalModel$lambdaOpt)
+
+varImp(Lasso)
+plot(varImp(Lasso))
+# 
+# Top 3 Education.num, age, hours.per.week
+
+```
+
+
+```{r}
+
+model <- glm(income ~  education.num + age + hours.per.week, binomial(link = 'logit'), data = train)
+
+summary(model)
+
+train$incomeProbability <- predict(model, newdata = train, type = "response")
+
+#make prediction column to store the probabilities
+train["Prediction"] = 0
+
+#set cutoff at 0.5 so that if probab
+train$Prediction[train$incomeProbability>0.5] = 1
+
+#for confusion matrix to work assign factors levels to prediction & income cols
+train$Prediction = as.factor(train$Prediction)
+train$income = as.factor(train$income)
+
+# predicted classes, Reference
+confusionMatrix(train$Prediction, train$income)
+#accuracy 77%
+#sensitivity 93%
+#specificty 31% 
+
+# still no good!
+
+# 
+
+test$incomeProbability <- predict(model, newdata = test, type = "response")
+
+test["Prediction"] = 0
+test$Prediction[test$incomeProbability>0.5] = 1
+test$Prediction=as.factor(test$Prediction)
+test$income=as.factor(test$income)
+
+# predicted classes, Reference
+confusionMatrix(test$Prediction, test$income)
+```
+
+
 
