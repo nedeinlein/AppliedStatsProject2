@@ -1,0 +1,313 @@
+---
+title: "objective 1.2"
+author: "Joseph Lazarus"
+date: "7/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(caret)
+library(dplyr)
+library(skimr)
+```
+
+## Import Data
+
+```{r pressure, echo=FALSE}
+df <- read.csv("https://raw.githubusercontent.com/nedeinlein/AppliedStatsProject2/main/data_folder/adult.data.csv", strip.white = TRUE)
+
+# change  " ?" to NA
+df <- na_if(df,"?")
+
+#check work
+colSums(is.na(df))
+
+#target column is income. Well call it a hit if income is ">50K" and assigning it a 1 else 0 this will help match the logit probabilites. Also no NA's in income so this should work. 
+df$income <- ifelse(df$income == ">50K",1,0)
+df$income <- as.factor(df$income)
+
+#convert the remaining character columns to factors the lazy way.
+df[sapply(df,is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
+
+str(df)
+
+
+#reorder dataframe 
+
+df <- df %>% select(income, age, fnlwgt, education.num, capital.gain, capital.loss, hours.per.week, workclass, education, marital.status, occupation, relationship, race, sex, native.country)
+
+```
+
+## looking for correlations
+```{r}
+library(GGally)
+ggpairs(df[, 1:7], aes(color = income, alpha = 0.4))
+
+
+ggcorr(df[, 1:7])
+```
+
+```{r}
+summary(na.omit(df$income))
+```
+
+## Create train test split
+```{r}
+df <- na.omit(df)
+summary(df$income)
+
+test_index <- createDataPartition(df$income, p=.3, list = FALSE)
+test <- df[test_index,]
+
+table(test$income)
+
+train <- df[-test_index,]
+
+prop.table(table(train$income))
+```
+
+## Dealing with imbalanced data sets methods used over sampling, under sampling, mixture of both
+
+```{r}
+library(ROSE)
+#perform undersampleing. Essentially reduces the number of observations in the majority class income <50k | 0
+#calling '$data' extracts the datafram object nested in the ovun.sample object
+train_under <- ovun.sample(income ~ ., data = train, method = "under", seed = 1234)$data
+
+table(train_under$income)
+
+#perform oversampling. Essentially replicates observations from the minority class. Income >50k | 1
+train_over <- ovun.sample(income ~ ., data = train, method = "over", seed = 1234)$data
+
+table(train_over$income)
+
+#perform a mix of the two
+train_both <- ovun.sample(income ~ ., data = train, method = "both", seed = 1234)$data
+
+table(train_both$income)
+
+#now we have three data sets to compare results to. 
+#but which variables should we use?
+```
+##simple Logistic regression using age and education number and even sampling sampling distribution using mixture of both
+```{r}
+test_simple <- test 
+train_simple <- train_both
+
+model.simple <- glm(income ~  education.num + age, binomial(link = 'logit'), data = train_simple)
+
+#store predictions in object to use later
+fit.simple <- predict(model.simple, newdata = test_simple, type = "response")
+
+#store predictions in test_simpledf
+test_simple$incomeProbability <- fit.simple
+
+#create a prediction column in test_simple
+test_simple["Prediction"] = 0
+
+# if else statement at cutoff 0.5
+test_simple$Prediction[test_simple$incomeProbability>0.5] = 1
+
+#turn prediction value into factor
+test_simple$Prediction=as.factor(test_simple$Prediction)
+
+
+#confusion matrix: order  predicted classes, Reference
+cm.simple <- confusionMatrix(test_simple$Prediction, test_simple$income)
+
+results.lasso<-prediction(fit.simple, test_over$income)
+roc.simple = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+```
+
+## Variable selection using undersampled
+```{r}
+library(glmnet)
+dat.train.x <- model.matrix(income~., train_under)
+dat.train.y<-as.factor(train_under[,1])
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+coef.u<-coef(cvfit,s='lambda.min',exact=TRUE)
+inds<-which(coef.u!=0)
+variables.u<-row.names(coef.u)[inds]
+variables.u<-variables.u[!(variables.u %in% '(Intercept)')]
+
+
+#CV misclassification error rate is little below .1
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model predictions go ahead and refit lasso using entire
+#data set
+finalmodel.u<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+
+```
+
+
+## Variable selection using oversampled
+```{r}
+library(glmnet)
+dat.train.x <- model.matrix(income~., train_over)
+dat.train.y<-train_over[,1]
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+#CV misclassification error rate is little below .1
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model predictions go ahead and refit lasso using entire
+#data set
+finalmodel.o<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+
+```
+
+## Variable selection using mix of both methods
+```{r}
+library(glmnet)
+dat.train.x <- model.matrix(income~., train_both)
+dat.train.y<-train_both[,1]
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+#CV misclassification error rate is little below .1
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model predictions go ahead and refit lasso using entire
+#data set
+finalmodel.b<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+coef
+```
+
+#make Predictions using undersampled
+```{r}
+#all models are being compared to the same test set. This duplicates the test set for the under, over, both, sampling schemes
+test_under <- test
+
+dat.test.x <- model.matrix(income ~.,test_under)
+#use final model from undersampled scheme
+fit.pred.lasso <- predict(finalmodel.u, newx = dat.test.x, type="response")
+
+#store lasso predicictions in test_under df as incomeProbability
+test_under$incomeProbability <- fit.pred.lasso
+
+#make prediction column to store the probabilities
+test_under["Prediction"] = 0
+
+#if else decesion on income probability columns. cutoff .5
+test_under$Prediction[test_under$incomeProbability>0.5] = 1
+#convert prediction column to factor
+test_under$Prediction=as.factor(test_under$Prediction)
+
+
+#Confusion matrix: order is -> predicted classes, Reference
+cm.under <- confusionMatrix(test_under$Prediction, test_under$income)
+
+results.lasso<-prediction(fit.pred.lasso, test_under$income)
+roc.lasso.u = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+```
+
+## Make Predictions using oversampled
+```{r}
+#all models are being compared to the same test set. This duplicates the test set for the under, over, both, sampling schemes
+test_over <- test
+
+dat.test.x <- model.matrix(income ~.,test_over)
+
+#use finalmodel.o for oversampled scheme
+fit.pred.lasso <- predict(finalmodel.o, newx = dat.test.x, type="response")
+
+#store lasso predicictions in test_over df as incomeProbability
+test_over$incomeProbability <- fit.pred.lasso
+
+#make prediction column to store the probabilities
+test_over["Prediction"] = 0
+
+#if else decision on income probability columns. cutoff .5
+test_over$Prediction[test_over$incomeProbability>0.5] = 1
+#convert to factor
+test_over$Prediction=as.factor(test_over$Prediction)
+
+
+#Confusion matrix: order is -> predicted classes, Reference
+cm.over <- confusionMatrix(test_over$Prediction, test_over$income)
+
+results.lasso<-prediction(fit.pred.lasso, test_over$income)
+roc.lasso.o = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+```
+
+## Make Predictions using Mix of both sampling schemes
+```{r}
+#all models are being compared to the same test set. This duplicates the test set for the under, over, both, sampling schemes
+test_both <- test
+
+dat.test.x <- model.matrix(income ~.,test_both)
+
+#use finalmodel.b for mix of both sampling schemes
+fit.pred.lasso <- predict(finalmodel.b, newx = dat.test.x, type="response")
+
+#store lasso predicictions in test_both df as incomeProbability
+test_both$incomeProbability <- fit.pred.lasso
+
+#make prediction column to store the probabilities
+test_both["Prediction"] = 0
+
+#if else decision on income probability columns. cutoff .5
+test_both$Prediction[test_both$incomeProbability>0.5] = 1
+#convert to factor
+test_both$Prediction=as.factor(test_both$Prediction)
+
+
+#Confusion matrix: order is -> predicted classes, Reference
+cm.both <- confusionMatrix(test_both$Prediction, test_both$income)
+
+results.lasso<-prediction(fit.pred.lasso, test_both$income)
+roc.lasso.b = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+```
+
+##Results of lasso variable selection compared with sampling schemes of Under, Over, Both
+```{r}
+cm.simple
+# accuracy 70.11, sensitive 70.35, Specificity 70.35
+
+cm.under
+# accuracy 80.48, sensitive 79.46, Specificity 83.53
+
+cm.over
+# accuracy 80.32, sensitive 79.21, Specificity 83.67
+
+cm.both
+# accuracy 80.35, sensitive 79.05, Specificity 84.29
+```
+##ROC Curves
+```{r}
+library(ROCR)
+plot(roc.simple)
+plot(roc.lasso.u,col ="purple", add = T)
+plot(roc.lasso.o, col ="orange", add = T)
+plot(roc.lasso.b, col = "blue", add = T)
+legend("bottomright",legend=c("Simple","Under","Over","Mix of both"),col=c("black","purple","orange","dodger blue"),lty=1,lwd=1)
+
+```
