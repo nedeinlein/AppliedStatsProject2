@@ -128,6 +128,7 @@ roc.simple = performance(results.lasso, measure = "tpr", x.measure = "fpr")
 ```{r}
 library(glmnet)
 dat.train.x <- model.matrix(income~., train_under)
+dat.train.x = dat.train.x[,-1]
 dat.train.y<-as.factor(train_under[,1])
 cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
 plot(cvfit)
@@ -303,6 +304,10 @@ cm.both
 ```
 ##ROC Curves
 ```{r}
+# try this package too pROC
+# log.roc<-roc(response=test$Status,predictor=log.predprobs$Cancer,levels=c("Healthy","Cancer"))
+#plot(log.roc,print.thres="best")
+
 library(ROCR)
 plot(roc.simple)
 plot(roc.lasso.u,col ="purple", add = T)
