@@ -1,0 +1,503 @@
+---
+title: "objective 1.2"
+author: "Joseph Lazarus"
+date: "7/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(dplyr)
+library(skimr)
+library(ggplot2)
+library(tidyverse)
+library(GGally)
+```
+
+## Import Data
+
+```{r echo=FALSE}
+#strip white space helps with the formatting of the 
+df <- read.csv("https://raw.githubusercontent.com/nedeinlein/AppliedStatsProject2/main/data_folder/adult.data.csv", strip.white = TRUE)
+```
+
+## Create NA values from ? and factor variables
+```{r echo=FALSE}
+# change  "?" to NA
+df[df=="?"]<-NA
+
+#check work
+colSums(is.na(df))
+
+#NA columns are workclass(1836), occupation(1843) and native.country(583) 
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#              Create Factor Variables
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#target column is income. Well call it a hit if income is ">50K" and assigning it a 1 else 0 this will help match the logit probabilites. Also no NA's in income so this should work. 
+df$income <- factor((ifelse(df$income == ">50K","High","Low")), levels = c("Low", "High"))
+
+#convert the remaining character columns to factors the lazy way.
+df[sapply(df,is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
+
+str(df)
+
+```
+
+# Re-arrange columns of DF so that income is first followed by numeric cols then factor cols. This will help with model snytax later
+```{r}
+
+df <- df %>% select(income, age, fnlwgt, education.num, capital.gain, capital.loss, hours.per.week, workclass, education, marital.status, occupation, relationship, race, sex, native.country)
+
+```
+
+
+ 
+
+## Evaluation of NA values continued
+
+# recall: that #occupateion 1843, Workclass 1836 
+
+#these to are very close is there some correlation between these two columns such that by removing NA's we remove a particular level of workclass and occupation from the model?
+
+#currently we are just removing them and saying we have enough data no big deal. 
+```{r}
+na_count <-sapply(df, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+
+#filter NA
+df2 <- df %>% filter(!is.na(workclass))
+df2 <- df2 %>% filter(!is.na(native.country))
+df2 <- df2 %>% filter(!is.na(occupation))
+
+#check of impact of filtering NA
+dim(df)
+dim(df2)
+```
+
+
+#summary statistics 
+```{r}
+#summary stats
+summary(df2)
+
+#most data is collected from United States (27504).  all other countries (2658)
+
+
+table(df2$income)
+# un even target variable 
+# low (22654) High (7508)
+
+
+#have extreme info for capital.gain and Hours/week
+df2[order(-df2$hours.per.week),]
+#apparently there are a number of people that work 99 hours a week
+# These people tend to be self employed or private employed, Farmers, Truckers, Fishing. Makes sense. 99 hours a week still leaves about 8.5 for sleeping. So its Feasiable. Say for farmers everything you do is part of your job likewise self emplopyed/ Sole proprietorship you could say everything you do is related to the business. Fishing as well. I worked in Alaska as a fisherman can confirm 16 hour days / 7 days a week (when working)  Likely this number was self generated in a questionaire we can look this up. 
+
+df2[order(-df2$capital.gain),]
+#as well as a number that maxed the capital gain information
+#note. all who maxed out capital gain are categorized as our target variable High income (>50K) This makes sense. 
+
+summary(df2)
+```
+  Income
+ Low  High 
+22654  7508 
+
+  native.country   
+  United-States   :27504   
+  Mexico          :  610     
+  Philippines     :  188               
+  Germany         :  128               
+  Puerto-Rico     :  109               
+ Canada           :  107               
+(Other)           : 1516 
+
+
+#write new cleaned Dataset to Github
+```{r}
+#clean data write to repo
+write.csv(df2,"cleandata.csv")
+```
+
+
+##EDA Correlations
+```{r}
+## looking for correlations with GGally
+
+library(GGally)
+ggpairs(df2[, 1:7], aes(color = income, alpha = 0.4))
+
+
+ggcorr(df2[, 1:7])
+
+```
+##nathan because I rearranged the data set with numberic values first we can use this slicing notation instead of creating df3
+
+#df3 <- df2 %>% select(c(income,age,fnlwgt,education.num,capital.gain,capital.loss,hours.per.week))
+#ggpairs(df3,columns = 2:7, mapping = ggplot2::aes(colour = income))
+```
+
+
+```
+## EDA continued
+```{r}
+
+#education Distribution Hue income (Important)
+df2 %>% ggplot(aes(x=reorder(education, education, function(x)length(x)))) + geom_bar(aes(fill = income)) + theme(axis.text.x = element_text(angle = 90)) + labs(x = "Education", title = "Education by Income")
+
+#for Comparison education.num
+# as expected it is the same graph!
+df2 %>% ggplot(aes(x=reorder(education.num, education.num, function(x)length(x)))) + geom_bar(aes(fill = income)) + theme(axis.text.x = element_text(angle = 90)) + labs(x = "Education.num", title = "Education by Income")
+
+
+#Occupation distribution Hue Income 
+df2 %>% ggplot(aes(x=reorder(occupation,occupation, function(x)length(x)))) + geom_bar(aes(fill = income))+ theme(axis.text.x = element_text(angle = 90)) + labs(x = "Occupation Field", title ="Occupation by Income Class")
+
+#workclass dist Hue income. Looks like nearly half of self-empl-inc makes more than 50K
+df2 %>% ggplot(aes(x= reorder(workclass, workclass, function(x)length(x)))) + geom_bar(aes(fill= income)) + scale_x_discrete( guide = guide_axis((n.dodge=3)))
+
+#race dist by income class
+df2 %>% ggplot(aes(x= reorder(race,race,function(x)length(x)))) + geom_bar(aes(fill=income))+ theme(axis.text.x = element_text(angle = 90)) + labs(x= "Race", title = "Race by Income Class")
+
+#sex dis by income class
+df2 %>% ggplot(aes(x= reorder(sex,sex, function(x)length(x)))) + geom_bar(aes(fill = income))+ theme(axis.text.x = element_text(angle = 90)) + labs(x= "Sex", title = "Sex by Income Class")
+
+
+
+
+#Native country dist by income class
+#Native Country Dist  Hue Income class
+df2 %>% ggplot(aes(x= reorder(native.country,native.country, function(x)length(x)))) + geom_bar(aes(fill= income))+ theme(axis.text.x = element_text(angle = 90)) + scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + labs(x = "Country", title = "Country by Income Class")
+#run this graph again but look at United states vs all other countries
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#             make new df with country United-states or Other
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+df3 = df2
+
+df3$native.country = as.character(df3$native.country)
+
+df3$native.country <- factor((ifelse(df3$native.country == 'United-States', 'United-States','Other')), levels = c('Other','United-States'))
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#Native Country Dist US vs the world by income class
+df3 %>% ggplot(aes(x= reorder(native.country,native.country, function(x)length(x)))) + geom_bar(aes(fill= income))+ theme(axis.text.x = element_text(angle = 90)) + labs(x = "Country", title =  "Income by Country")
+
+```
+
+
+
+## Create train test split
+```{r}
+library(caret)
+
+#setting these to 1' and 0's is easier for me. When I kept it high and low with the levels I got and inverted ROC curve.
+# 1 is the target variable when income is high aka >50k
+df2$income <- ifelse(df2$income == "High", 1,0)
+df2$income <- as.factor(df2$income)
+
+test_index <- createDataPartition(df2$income, p=.3, list = FALSE)
+test <- df2[test_index,]
+
+table(test$income)
+
+train <- df2[-test_index,]
+
+table(train$income)
+prop.table(table(train$income))
+```
+
+## Dealing with imbalanced data sets methods used over sampling, under sampling, mixture of both
+
+```{r}
+library(ROSE)
+#perform undersampleing. Essentially reduces the number of observations in the majority class income <50k | 0
+#calling '$data' extracts the datafram object nested in the ovun.sample object
+train_under <- ovun.sample(income ~ ., data = train, method = "under", seed = 1234)$data
+
+table(train_under$income)
+
+#perform oversampling. Essentially replicates observations from the minority class. Income >50k | 1
+train_over <- ovun.sample(income ~ ., data = train, method = "over", seed = 1234)$data
+
+table(train_over$income)
+
+#perform a mix of the two
+train_both <- ovun.sample(income ~ ., data = train, method = "both", seed = 1234)$data
+
+table(train_both$income)
+
+#now we have three data sets to compare results to. 
+#but which variables should we use?
+```
+##simple Logistic regression using age and education number and even sampling sampling distribution using mixture of both
+```{r}
+test_simple <- test 
+train_simple <- train_both
+
+model.simple <- glm(income ~  education.num + age, binomial(link = 'logit'), data = train_simple)
+
+#store predictions in object to use later
+fit.simple <- predict(model.simple, newdata = test_simple, type = "response")
+
+#store predictions in test_simpledf
+test_simple$incomeProbability <- fit.simple
+
+#create a prediction column in test_simple
+test_simple["Prediction"] = 0
+
+# if else statement at cutoff 0.5
+test_simple$Prediction[test_simple$incomeProbability>0.5] = 1
+
+#turn prediction value into factor
+test_simple$Prediction=as.factor(test_simple$Prediction)
+
+# if else statement at cutoff 0.5
+#cutoff <- 0.5
+#test_simple$Prediction = factor(ifelse(test_simple$incomeProbability>cutoff, "High", "Low"), levels = c("Low","High"))
+
+
+#confusion matrix: order  predicted classes, Reference
+cm.simple <- confusionMatrix(test_simple$Prediction, test_simple$income)
+
+results.lasso<-prediction(fit.simple, test_simple$income)
+roc.simple = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+```
+
+## Variable selection using undersampled
+```{r}
+library(glmnet)
+dat.train.x <- model.matrix(income~., train_under)
+#removes extra Intercept
+dat.train.x = dat.train.x[,-1]
+dat.train.y<-as.factor(train_under[,1])
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+
+#By Calling dat.train.x[,-1] above we should only have one intercept here
+coef(cvfit, s = "lambda.min")
+
+coef.u<-coef(cvfit,s='lambda.min',exact=TRUE)
+inds<-which(coef.u!=0)
+variables.u<-row.names(coef.u)[inds]
+variables.u<-variables.u[!(variables.u %in% '(Intercept)')]
+
+
+#CV misclassification error rate is little below .1
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model predictions go ahead and refit lasso using entire
+#data set
+finalmodel.u<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+
+```
+
+
+## Variable selection using oversampled
+```{r}
+library(glmnet)
+dat.train.x <- model.matrix(income~., train_over)
+#removes extra Intercept
+dat.train.x = dat.train.x[,-1]
+dat.train.y<-train_over[,1]
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+
+#By Calling dat.train.x[,-1] above we should only have one intercept here
+coef(cvfit, s = "lambda.min")
+
+
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model predictions go ahead and refit lasso using entire
+#data set
+finalmodel.o<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+
+```
+
+## Variable selection using mix of both methods
+```{r}
+library(glmnet)
+dat.train.x <- model.matrix(income~., train_both)
+#removes extra Intercept
+dat.train.x = dat.train.x[,-1]
+
+dat.train.y<-train_both[,1]
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+
+#By Calling dat.train.x[,-1] above we should only have one intercept here
+coef(cvfit, s = "lambda.min")
+
+
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model predictions go ahead and refit lasso using entire
+#data set
+finalmodel.b<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+coef
+```
+
+#make Predictions using undersampled
+```{r}
+#all models are being compared to the same test set. This duplicates the test set for the under, over, both, sampling schemes
+test_under <- test
+
+dat.test.x <- model.matrix(income ~.,test_under)
+#removes extra intercept
+dat.test.x = dat.test.x[,-1] 
+
+#use final model from undersampled scheme
+fit.pred.lasso <- predict(finalmodel.u, newx = dat.test.x, type="response")
+
+#store lasso predicictions in test_under df as incomeProbability
+test_under$incomeProbability <- fit.pred.lasso
+
+#make prediction column to store the probabilities
+test_under["Prediction"] = 0
+
+# if else statement at cutoff 0.5
+test_under$Prediction[test_under$incomeProbability>0.5] = 1
+
+#turn prediction value into factor
+test_under$Prediction=as.factor(test_under$Prediction)
+
+# set cutoff to 0.5
+#cutoff <- 0.5
+#ifelse factorization of based on cutoff 
+#test_under$Prediction = factor(ifelse(test_under$incomeProbability>cutoff, "High", "Low"), levels = c("High","Low"))
+
+
+
+#Confusion matrix: order is -> predicted classes, Reference
+cm.under <- confusionMatrix(test_under$Prediction, test_under$income)
+
+results.lasso<-prediction(fit.pred.lasso, test_under$income)
+roc.lasso.u = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+```
+
+## Make Predictions using oversampled
+```{r}
+#all models are being compared to the same test set. This duplicates the test set for the under, over, both, sampling schemes
+test_over <- test
+
+dat.test.x <- model.matrix(income ~.,test_over)
+#removes extra intercept
+dat.test.x = dat.test.x[,-1] 
+
+#use finalmodel.o for oversampled scheme
+fit.pred.lasso <- predict(finalmodel.o, newx = dat.test.x, type="response")
+
+#store lasso predicictions in test_over df as incomeProbability
+test_over$incomeProbability <- fit.pred.lasso
+
+#make prediction column to store the probabilities
+test_over["Prediction"] = 0
+
+# if else statement at cutoff 0.5
+test_over$Prediction[test_over$incomeProbability>0.5] = 1
+
+#turn prediction value into factor
+test_over$Prediction=as.factor(test_over$Prediction)
+
+# set cutoff to 0.5
+#cutoff <- 0.5
+#ifelse factorization of based on cutoff 
+#test_over$Prediction = factor(ifelse(test_over$incomeProbability>cutoff, "High", "Low"), levels = c("High","Low"))
+
+
+#Confusion matrix: order is -> predicted classes, Reference
+cm.over <- confusionMatrix(test_over$Prediction, test_over$income)
+
+results.lasso<-prediction(fit.pred.lasso, test_over$income)
+roc.lasso.o = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+```
+
+## Make Predictions using Mix of both sampling schemes
+```{r}
+#all models are being compared to the same test set. This duplicates the test set for the under, over, both, sampling schemes
+test_both <- test
+
+dat.test.x <- model.matrix(income ~.,test_both)
+#removes extra intercept
+dat.test.x = dat.test.x[,-1] 
+
+#use finalmodel.b for mix of both sampling schemes
+fit.pred.lasso <- predict(finalmodel.b, newx = dat.test.x, type="response")
+
+#store lasso predicictions in test_both df as incomeProbability
+test_both$incomeProbability <- fit.pred.lasso
+
+#make prediction column to store the probabilities
+test_both["Prediction"] = 0
+
+# if else statement at cutoff 0.5
+test_both$Prediction[test_both$incomeProbability>0.5] = 1
+
+#turn prediction value into factor
+test_both$Prediction=as.factor(test_both$Prediction)
+
+#cutoff <- 0.5
+#ifelse factorization based on cutoff 
+#test_both$Prediction = factor(ifelse(test_both$incomeProbability>cutoff, "High", "Low"), levels = c("High","Low"))
+
+
+#Confusion matrix: order is -> predicted classes, Reference
+cm.both <- confusionMatrix(test_both$Prediction, test_both$income)
+
+results.lasso<-prediction(fit.pred.lasso, test_both$income)
+roc.lasso.b = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+```
+
+##Results of lasso variable selection compared with sampling schemes of Under, Over, Both
+```{r}
+cm.simple
+# accuracy 70.11, sensitive 70.35, Specificity 70.35
+
+cm.under
+# accuracy 80.48, sensitive 79.46, Specificity 83.53
+
+cm.over
+# accuracy 80.32, sensitive 79.21, Specificity 83.67
+
+cm.both
+# accuracy 80.35, sensitive 79.05, Specificity 84.29
+```
+##ROC Curves
+```{r}
+# try this package too pROC This will give optimal cut off and display along the AUC graph
+# log.roc<-roc(response=test$Status,predictor=log.predprobs$Cancer,levels=c("Healthy","Cancer"))
+#plot(log.roc,print.thres="best")
+
+library(ROCR)
+plot(roc.simple)
+plot(roc.lasso.u,col ="purple", add = T)
+plot(roc.lasso.o, col ="orange", add = T)
+plot(roc.lasso.b, col = "blue", add = T)
+legend("bottomright",legend=c("Simple","Under","Over","Mix of both"),col=c("black","purple","orange","dodger blue"),lty=1,lwd=1)
+
+```
