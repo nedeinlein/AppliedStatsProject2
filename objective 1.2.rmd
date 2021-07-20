@@ -120,7 +120,7 @@ test_simple$Prediction=as.factor(test_simple$Prediction)
 #confusion matrix: order  predicted classes, Reference
 cm.simple <- confusionMatrix(test_simple$Prediction, test_simple$income)
 
-results.lasso<-prediction(fit.simple, test_over$income)
+results.lasso<-prediction(fit.simple, test_simple$income)
 roc.simple = performance(results.lasso, measure = "tpr", x.measure = "fpr")
 ```
 
@@ -128,6 +128,7 @@ roc.simple = performance(results.lasso, measure = "tpr", x.measure = "fpr")
 ```{r}
 library(glmnet)
 dat.train.x <- model.matrix(income~., train_under)
+#removes extra intecept
 dat.train.x = dat.train.x[,-1]
 dat.train.y<-as.factor(train_under[,1])
 cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
@@ -159,6 +160,8 @@ finalmodel.u<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$
 ```{r}
 library(glmnet)
 dat.train.x <- model.matrix(income~., train_over)
+#removes extra intecept
+dat.train.x = dat.train.x[,-1]
 dat.train.y<-train_over[,1]
 cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
 plot(cvfit)
@@ -181,6 +184,8 @@ finalmodel.o<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$
 ```{r}
 library(glmnet)
 dat.train.x <- model.matrix(income~., train_both)
+#removes extra intecept
+dat.train.x = dat.train.x[,-1]
 dat.train.y<-train_both[,1]
 cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
 plot(cvfit)
@@ -205,6 +210,8 @@ coef
 test_under <- test
 
 dat.test.x <- model.matrix(income ~.,test_under)
+#removes extra intercept
+dat.test.x = dat.test.x[,-1] 
 #use final model from undersampled scheme
 fit.pred.lasso <- predict(finalmodel.u, newx = dat.test.x, type="response")
 
@@ -234,6 +241,8 @@ roc.lasso.u = performance(results.lasso, measure = "tpr", x.measure = "fpr")
 test_over <- test
 
 dat.test.x <- model.matrix(income ~.,test_over)
+#removes extra intercept
+dat.test.x = dat.test.x[,-1] 
 
 #use finalmodel.o for oversampled scheme
 fit.pred.lasso <- predict(finalmodel.o, newx = dat.test.x, type="response")
@@ -264,6 +273,8 @@ roc.lasso.o = performance(results.lasso, measure = "tpr", x.measure = "fpr")
 test_both <- test
 
 dat.test.x <- model.matrix(income ~.,test_both)
+#removes extra intercept
+dat.test.x = dat.test.x[,-1] 
 
 #use finalmodel.b for mix of both sampling schemes
 fit.pred.lasso <- predict(finalmodel.b, newx = dat.test.x, type="response")

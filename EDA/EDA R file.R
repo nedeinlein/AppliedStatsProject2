@@ -33,11 +33,13 @@ df3 <- df2 %>% select(c(income,age,fnlwgt,education.num,capital.gain,capital.los
 ggpairs(df3,columns = 2:7, mapping = ggplot2::aes(colour = income))
 
 #categorical graphing
-df2 %>% ggplot(aes(x= education, fill = income)) + geom_bar() + theme(axis.text.x = element_text(angle = 90))
+
+#education level Histogram Hue is income. 
+df2 %>% ggplot(aes(fct_reorder(x= education, y=income), fill = income)) + geom_bar() + theme(axis.text.x = element_text(angle = 90))
 df2 %>% ggplot(aes(x= occupation, fill = income)) + geom_bar()+ theme(axis.text.x = element_text(angle = 90))
 df2 %>% ggplot(aes(x= relationship, fill = income)) + geom_bar()+ theme(axis.text.x = element_text(angle = 90))
 df2 %>% ggplot(aes(x= native.country, fill = income)) + geom_bar()+ theme(axis.text.x = element_text(angle = 90))
-df2 %>% ggplot(aes(x= workclass, fill = income)) + geom_bar()
+df2 %>% ggplot(aes(x= workclass, fill = income)) + geom_bar() + scale_x_discrete( guide = guide_axis((n.dodge=3)))
 df2 %>% ggplot(aes(x= marital.status, fill = income)) + geom_bar()+ theme(axis.text.x = element_text(angle = 90))
 df2 %>% ggplot(aes(x= race, fill = income)) + geom_bar()+ theme(axis.text.x = element_text(angle = 90))
 df2 %>% ggplot(aes(x= sex, fill = income)) + geom_bar()+ theme(axis.text.x = element_text(angle = 90))
