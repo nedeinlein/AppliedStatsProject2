@@ -501,3 +501,66 @@ plot(roc.lasso.b, col = "blue", add = T)
 legend("bottomright",legend=c("Simple","Under","Over","Mix of both"),col=c("black","purple","orange","dodger blue"),lty=1,lwd=1)
 
 ```
+## ROC with pROC
+```{r}
+library(pROC)
+# try this package too pROC This will give optimal cut off and display along the AUC graph
+# log.roc<-roc(response=test$Status,predictor=log.predprobs$Cancer,levels=c("Healthy","Cancer"))
+#plot(log.roc,print.thres="best")
+
+lasso.roc.b <- roc(response = test_both$income, predictor = fit.pred.lasso)
+
+plot(lasso.roc.b, print.thres='best')
+
+#Optimal cutoff is 0.482
+
+#also note that this package readjus the x axis  but pretty neat. 
+```
+## Decesion Tree Model
+```{r}
+library(rpart)
+library(rpart.plot)
+# reset train 
+train_under.DT <- ovun.sample(income ~ ., data = train, method = "under", seed = 1234)$data
+#duplicate test
+test_DT <- test
+
+#CP Default is 0.001
+DT.Model.u <- rpart(train_under.DT$income ~ ., data = train_under.DT, method = 'class', cp = .001)
+
+#list of Important Variables
+Imp.Vars <-varImp(DT.Model.u)
+#Print an image of of the decesion tree
+rpart.plot(DT.Model.u)
+
+#make Predictions from the DT model
+DT.predictions = predict(DT.Model.u, newdata = test_DT[,-1], type = 'class')
+
+#store Confusion Matrix Object of DT.
+cm.DT = confusionMatrix(DT.predictions, test_DT$income)
+
+#store  predictions in test_DT 
+test_DT$Prediction <- DT.predictions
+
+
+
+
+
+#ROC Metrics
+
+DT.roc.u <- roc(response = test_DT$income, predictor = DT.predictions)
+
+plot(lasso.roc.b, print.thres='best')
+
+results.DT = prediction(test_DT$Prediction, test_DT$income)
+ROC.DT.u = performance(DT.predictions, measure = "tpr", x.measure = "fpr")
+
+results.lasso<-prediction(fit.pred.lasso, test_both$income)
+roc.lasso.b = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+#tune the hyperparameter CP
+plotcp(DT.Model.u)
+
+printcp(DT.Model.u)
+```
+
