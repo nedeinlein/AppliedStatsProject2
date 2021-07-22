@@ -472,7 +472,43 @@ roc.lasso.b = performance(results.lasso, measure = "tpr", x.measure = "fpr")
 
 ```
 
-##Results of lasso variable selection compared with sampling schemes of Under, Over, Both
+## Decesion Tree Model
+```{r}
+library(rpart)
+library(rpart.plot)
+# reset train 
+train_under.DT <- ovun.sample(income ~ ., data = train, method = "under", seed = 1234)$data
+#duplicate test
+test_DT <- test
+
+#CP Default is 0.001
+DT.Model.u <- rpart(train_under.DT$income ~ ., data = train_under.DT, method = 'class', cp = .001)
+
+#list of Important Variables
+Imp.Vars <-varImp(DT.Model.u)
+#Print an image of of the decesion tree
+rpart.plot(DT.Model.u)
+
+#make Predictions from the DT model
+DT.predictions = predict(DT.Model.u, newdata = test_DT[,-1], type = 'class')
+
+#store Confusion Matrix Object of DT.
+cm.DT = confusionMatrix(DT.predictions, test_DT$income)
+
+#store  predictions in test_DT 
+test_DT$Prediction <- DT.predictions
+
+#ROC goes here
+
+```
+
+
+
+
+
+
+
+## Model Comparisons
 ```{r}
 cm.simple
 # accuracy 70.11, sensitive 70.35, Specificity 70.35
@@ -485,6 +521,73 @@ cm.over
 
 cm.both
 # accuracy 80.35, sensitive 79.05, Specificity 84.29
+
+cm.DT
+
+
+#From sampling schemes only plotting the under method b/c it reflects true values in the data set and because they are all so close
+#collectively storing model sensitivities for plotting. 
+Sensitivities <- c(cm.simple$byClass["Sensitivity"], cm.under$byClass["Sensitivity"], cm.DT$byClass["Sensitivity"])
+
+Specificities <- c(cm.simple$byClass["Specificity"], cm.under$byClass["Specificity"], cm.DT$byClass["Specificity"])
+
+Precisions <- c(cm.simple$byClass["Precision"], cm.under$byClass["Precision"], cm.DT$byClass["Precision"])
+
+Recalls <- c(cm.simple$byClass["Recall"], cm.under$byClass["Recall"], cm.DT$byClass["Recall"])
+
+Accuracies <- c(cm.simple$overall[1], cm.under$overall[1], cm.DT$overall[1])
+
+Balanced_Accuracies <- c(cm.simple$byClass["Balanced Accuracy"], cm.under$byClass["Balanced Accuracy"], cm.DT$byClass["Balanced Accuracy"])
+
+F1_Scores <- c(cm.simple$byClass["F1"], cm.under$byClass["F1"], cm.DT$byClass["F1"])
+
+#create a data frame from metrics in CM and create vector of model names
+#model name vector
+Models <- c('Simple_LogReg', 'Lasso_LogReg', 'DT')
+
+Casestudy.Results <- data.frame(Models, Sensitivities,Specificities, Precisions, Recalls, Accuracies, Balanced_Accuracies, F1_Scores)
+
+Casestudy.Results
+
+
+Casestudy.Results$Sensitivities <- round(Casestudy.Results$Sensitivities,digits = 3)
+Casestudy.Results$Specificities <- round(Casestudy.Results$Specificities, digits = 3)
+Casestudy.Results$Precisions <- round(Casestudy.Results$Precisions, digits  = 3)
+Casestudy.Results$Recalls <- round(Casestudy.Results$Recalls, digits = 3)
+Casestudy.Results$F1_Scores <- round(Casestudy.Results$F1_Scores, digits=3)
+Casestudy.Results$Accuracies <- round(Casestudy.Results$Accuracies, digits= 3)
+Casestudy.Results$Balanced_Accuracies <- round(Casestudy.Results$Balanced_Accuracies, digits  = 3)
+
+
+sn.p <-Casestudy.Results %>% ggplot(aes(Models, Sensitivities, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=Sensitivities),vjust=3, size = 4) + ggtitle('Comparative Sensitivities') + xlab('') + ylab('')
+
+sp.p <-Casestudy.Results %>% ggplot(aes(Models, Specificities, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=Specificities),vjust=3, size = 4) + ggtitle('Comparative Specificities') + xlab('') + ylab('')
+
+pr.p <-Casestudy.Results %>% ggplot(aes(Models, Precisions, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=Precisions),vjust=3, size = 4) + ggtitle('Comparative Precisions') + xlab('') + ylab('')
+
+ba.p <- Casestudy.Results %>% ggplot(aes(Models, Balanced_Accuracies, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=Balanced_Accuracies),vjust=3, size = 4) + ggtitle('Comparative Balanced_Accuracies') + xlab('') + ylab('')
+
+f1.p <- Casestudy.Results %>% ggplot(aes(Models, F1_Scores, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=F1_Scores),vjust=3, size = 4) + ggtitle('Comparative F1_Scores') + xlab('') + ylab('')
+
+#sensitivity plot
+sn.p
+
+#specificity Plot
+sp.p
+
+#precision plot
+pr.p
+
+#balanced accuracies Plot
+ba.p
+
+#F1 Score plot
+f1.p
 ```
 ##ROC Curves
 ```{r}
@@ -515,51 +618,5 @@ plot(lasso.roc.b, print.thres='best')
 
 #also note that this package readjus the x axis  but pretty neat. 
 ```
-## Decesion Tree Model
-```{r}
-library(rpart)
-library(rpart.plot)
-# reset train 
-train_under.DT <- ovun.sample(income ~ ., data = train, method = "under", seed = 1234)$data
-#duplicate test
-test_DT <- test
 
-#CP Default is 0.001
-DT.Model.u <- rpart(train_under.DT$income ~ ., data = train_under.DT, method = 'class', cp = .001)
-
-#list of Important Variables
-Imp.Vars <-varImp(DT.Model.u)
-#Print an image of of the decesion tree
-rpart.plot(DT.Model.u)
-
-#make Predictions from the DT model
-DT.predictions = predict(DT.Model.u, newdata = test_DT[,-1], type = 'class')
-
-#store Confusion Matrix Object of DT.
-cm.DT = confusionMatrix(DT.predictions, test_DT$income)
-
-#store  predictions in test_DT 
-test_DT$Prediction <- DT.predictions
-
-
-
-
-
-#ROC Metrics
-
-DT.roc.u <- roc(response = test_DT$income, predictor = DT.predictions)
-
-plot(lasso.roc.b, print.thres='best')
-
-results.DT = prediction(test_DT$Prediction, test_DT$income)
-ROC.DT.u = performance(DT.predictions, measure = "tpr", x.measure = "fpr")
-
-results.lasso<-prediction(fit.pred.lasso, test_both$income)
-roc.lasso.b = performance(results.lasso, measure = "tpr", x.measure = "fpr")
-
-#tune the hyperparameter CP
-plotcp(DT.Model.u)
-
-printcp(DT.Model.u)
-```
 
