@@ -297,7 +297,7 @@ cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
 print("Penalty Value:")
 cvfit$lambda.min
 
-#For final model predictions go ahead and refit lasso using entire
+#For final model undersample, refit on test set
 #data set
 finalmodel.u<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
 
@@ -325,8 +325,7 @@ cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
 print("Penalty Value:")
 cvfit$lambda.min
 
-#For final model predictions go ahead and refit lasso using entire
-#data set
+#For final model over sample refit lasso using test set
 finalmodel.o<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
 
 ```
@@ -353,7 +352,7 @@ cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
 print("Penalty Value:")
 cvfit$lambda.min
 
-#For final model predictions go ahead and refit lasso using entire
+#For final model mix of over/under  go ahead and refit lasso using test set
 #data set
 finalmodel.b<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
 coef
