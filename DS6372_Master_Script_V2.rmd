@@ -1,0 +1,942 @@
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(dplyr)
+library(skimr)
+library(ggplot2)
+library(tidyverse)
+library(GGally)
+library(epitools)
+library(ROCR)
+```
+
+## Import Data
+
+```{r echo=FALSE}
+#strip white space helps with the formatting of the 
+df <- read.csv("https://raw.githubusercontent.com/nedeinlein/AppliedStatsProject2/main/data_folder/adult.data.csv", strip.white = TRUE)
+```
+
+## Create NA values from ? and factor variables
+```{r echo=FALSE}
+# change  "?" to NA
+df[df=="?"]<-NA
+
+#check work
+colSums(is.na(df))
+
+#NA columns are workclass(1836), occupation(1843) and native.country(583) 
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#              Create Factor Variables
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#target column is income. Well call it a hit if income is ">50K" and assigning it a 1 else 0 this will help match the logit probabilites. Also no NA's in income so this should work. 
+df$income <- factor((ifelse(df$income == ">50K","High","Low")), levels = c("Low", "High"))
+
+#convert the remaining character columns to factors the lazy way.
+df[sapply(df,is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
+
+str(df)
+
+```
+
+# Re-arrange columns of DF so that income is first followed by numeric cols then factor cols. This will help with model snytax later
+```{r}
+
+df <- df %>% dplyr::select(income, age, fnlwgt, education.num, capital.gain, capital.loss, hours.per.week, workclass, education, marital.status, occupation, relationship, race, sex, native.country)
+
+```
+
+
+
+
+## Evaluation of NA values continued
+
+# recall: that #occupateion 1843, Workclass 1836 
+
+#these to are very close is there some correlation between these two columns such that by removing NA's we remove a particular level of workclass and occupation from the model?
+
+#currently we are just removing them and saying we have enough data no big deal. 
+```{r}
+#count of NA group
+data.frame(sapply(df, function(y) sum(length(which(is.na(y))))))
+
+#filter NA
+df2 <- df %>% filter(!is.na(workclass))
+df2 <- df2 %>% filter(!is.na(native.country))
+df2 <- df2 %>% filter(!is.na(occupation))
+
+#check of impact of filtering NA
+dim(df)
+dim(df2)
+```
+
+
+#summary statistics 
+```{r}
+#summary stats
+summary(df2)
+
+#most data is collected from United States (27504).  all other countries (2658)
+
+
+table(df2$income)
+# un even target variable 
+# low (22654) High (7508)
+
+
+#have extreme info for capital.gain and Hours/week
+df2[order(-df2$hours.per.week),]
+#apparently there are a number of people that work 99 hours a week
+# These people tend to be self employed or private employed, Farmers, Truckers, Fishing. Makes sense. 99 hours a week still leaves about 8.5 for sleeping. So its Feasiable. Say for farmers everything you do is part of your job likewise self emplopyed/ Sole proprietorship you could say everything you do is related to the business. Fishing as well. I worked in Alaska as a fisherman can confirm 16 hour days / 7 days a week (when working)  Likely this number was self generated in a questionaire we can look this up. 
+
+df2[order(-df2$capital.gain),]
+#as well as a number that maxed the capital gain information
+#note. all who maxed out capital gain are categorized as our target variable High income (>50K) This makes sense. 
+
+summary(df2)
+```
+Income
+Low  High 
+22654  7508 
+
+native.country   
+United-States   :27504   
+Mexico          :  610     
+Philippines     :  188               
+Germany         :  128               
+Puerto-Rico     :  109               
+Canada           :  107               
+(Other)           : 1516 
+
+
+Obviously the majority of participants are from the USA in the dataset. Once we filter out USA,
+We can see the distribution of other countries
+```{r}
+
+library(tm)
+library(wordcloud)
+wordcloud_df <- read.csv("https://raw.githubusercontent.com/nedeinlein/AppliedStatsProject2/main/data_folder/adult.data.csv", strip.white = TRUE)
+
+make_cloud <- function(txt_vector, txt_filters){
+  dtm <- TermDocumentMatrix(Corpus(VectorSource(txt_vector)))
+  m <- as.matrix(dtm)
+  v <- sort(rowSums(m), decreasing = TRUE)
+  # Filter out "Ale" b/c it skews the entire cloud
+  d <- data.frame(word = names(v), freq = v) %>% filter(word != txt_filters)
+  # Make the cloud
+  wordcloud(word = d$word, freq = d$freq, min.freq = 2, 
+            max.words = 150, random.order = FALSE, rot.per= 0.35,
+            colors = brewer.pal(8, "Dark2"))
+}
+
+## Making the Word Cloud without US
+make_cloud(wordcloud_df$native.country, txt_filters = c("united-states"))
+
+## Making the Word Cloud without US / Mexico
+make_cloud(wordcloud_df$native.country, txt_filters = c("united-states", "mexico")); rm(wordcloud_df)
+
+
+```
+
+## Plotting correlation matrix and scatter matrix to visualize correlations
+```{r}
+## looking for correlations with GGally
+library(GGally)
+ggpairs(df2[, 1:7], aes(color = income, alpha = 0.4))
+# Correlation Plot
+ggcorr(df2[, 1:7])
+
+```
+
+## Plotting bar graphs for some key variables
+```{r}
+
+#education Distribution Hue income (Important)
+df2 %>% ggplot(aes(x=reorder(education, education, function(x)length(x)))) + geom_bar(aes(fill = income)) + theme(axis.text.x = element_text(angle = 90)) + labs(x = "Education", title = "Education by Income")
+
+#for Comparison education.num
+# as expected it is the same graph!
+df2 %>% ggplot(aes(x=reorder(education.num, education.num, function(x)length(x)))) + geom_bar(aes(fill = income)) + theme(axis.text.x = element_text(angle = 90)) + labs(x = "Education.num", title = "Education by Income")
+
+
+#Occupation distribution Hue Income 
+df2 %>% ggplot(aes(x=reorder(occupation,occupation, function(x)length(x)))) + geom_bar(aes(fill = income))+ theme(axis.text.x = element_text(angle = 90)) + labs(x = "Occupation Field", title ="Occupation by Income Class")
+
+#workclass dist Hue income. Looks like nearly half of self-empl-inc makes more than 50K
+df2 %>% ggplot(aes(x= reorder(workclass, workclass, function(x)length(x)))) + geom_bar(aes(fill= income)) + scale_x_discrete( guide = guide_axis((n.dodge=3)))
+
+#race dist by income class
+df2 %>% ggplot(aes(x= reorder(race,race,function(x)length(x)))) + geom_bar(aes(fill=income))+ theme(axis.text.x = element_text(angle = 90)) + labs(x= "Race", title = "Race by Income Class")
+
+#sex dis by income class
+df2 %>% ggplot(aes(x= reorder(sex,sex, function(x)length(x)))) + geom_bar(aes(fill = income))+ theme(axis.text.x = element_text(angle = 90)) + labs(x= "Sex", title = "Sex by Income Class")
+
+
+
+
+#Native country dist by income class
+#Native Country Dist  Hue Income class
+df2 %>% ggplot(aes(x= reorder(native.country,native.country, function(x)length(x)))) + geom_bar(aes(fill= income))+ theme(axis.text.x = element_text(angle = 90)) + scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + labs(x = "Country", title = "Country by Income Class")
+#run this graph again but look at United states vs all other countries
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#             make new df with country United-states or Other
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+df3 = df2
+
+df3$native.country = as.character(df3$native.country)
+
+df3$native.country <- factor((ifelse(df3$native.country == 'United-States', 'United-States','Other')), levels = c('Other','United-States'))
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#Native Country Dist US vs the world by income class
+df3 %>% ggplot(aes(x= reorder(native.country,native.country, function(x)length(x)))) + geom_bar(aes(fill= income))+ theme(axis.text.x = element_text(angle = 90)) + labs(x = "Country", title =  "Income by Country")
+
+#adding new college education feature
+degrees <- df3 %>% filter(education =='Prof-school'| education == 'Assoc-acdm'| education == 'Assoc-voc'| education == 'Bachelors'| education == 'Masters'| education == 'Doctorate')
+
+nodegrees <- df3 %>% filter(education !='Prof-school'| education != 'Assoc-acdm'| education != 'Assoc-voc'| education != 'Bachelors'| education != 'Masters'| education != 'Doctorate')
+
+degrees <- degrees %>% mutate(degreeobtained = 'Yes')
+nodegrees <- nodegrees %>% mutate(degreeobtained = 'No')
+df3 <- rbind(degrees,nodegrees)
+
+df3 %>% ggplot(aes(x=degreeobtained, )) + geom_bar(aes(fill = income)) + theme(axis.text.x = element_text(angle = 90)) + labs(x = "College Degree ?", title = "Income by College Level Education")
+```
+#
+
+#write new cleaned Dataset to Github
+```{r}
+#clean data write to repo
+write.csv(df3,"cleandata.csv")
+```
+
+```{r}
+#odds Ratio Tables
+oddsratio.wald(table(df3$workclass,df3$income))
+oddsratio.wald(table(df3$marital.status,df3$income))
+oddsratio.wald(table(df3$relationship,df3$income))
+oddsratio.wald(table(df3$race,df3$income))
+oddsratio.wald(table(df3$sex,df3$income))
+oddsratio.wald(table(df3$native.country,df3$income))
+oddsratio.wald(table(df3$degreeobtained,df3$income))
+oddsratio.wald(table(df3$education,df3$income))
+```
+# Function to visualize categorical relationships
+```{r}
+# Function to plot interactions of two categorical variables and a numeric response
+plot_categorical_interactions <- function(df, response, grp, x2){
+    mysummary<-function(x){
+    result<-c(length(x),mean(x),sd(x),sd(x)/length(x),min(x),max(x),IQR(x))
+    names(result)<-c("N","Mean","SD","SE","Min","Max","IQR")
+    return(result)
+  }
+  sumstats<-aggregate(response~grp*x2,data=df,mysummary)
+  sumstats<-cbind(sumstats[,1:2],sumstats[,-(1:2)])
+  
+  ggplot(sumstats,aes(x=x2,y=Mean,group=grp,colour=grp))+
+    ylab(deparse(substitute(response)))+
+    xlab(deparse(substitute(x2))) + 
+    geom_line()+
+    geom_point()+
+    geom_errorbar(aes(ymin=Mean-SE,ymax=Mean+SE),width=.1) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+}
+
+## Plotting interaction plots ##
+plot_categorical_interactions(df = df3, response = df3$age, grp = df3$sex, x2 = df3$occupation)
+plot_categorical_interactions(df = df3, response = df3$age, grp = df3$sex, x2 = df3$workclass)
+```
+# Function to plot boxplots of variables after removing outliers
+```{r}
+# Remove outliers from single column
+remove_outliers <- function(x, na.rm = TRUE, ...) {
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = na.rm, ...)
+  H <- 1.5 * IQR(x, na.rm = na.rm)
+  y <- x
+  y[x < (qnt[1] - H)] <- NA
+  y[x > (qnt[2] + H)] <- NA
+  y
+}
+
+# Remove outliers from entire dataset
+remove_outliers_from_df <- function(df){
+  cols <- c(colnames(df))
+  df[cols] <- sapply(df[cols], remove_outliers)
+  return(df)
+}
+
+
+## This will help us see which columns are good candidates for imputation
+library(reshape2)
+make_plots <- function(df, plottype = "box", histo_var = NULL){
+  if (plottype == "box"){
+    melted_df <- melt(df)
+    ggplot(data = melted_df, aes(x=variable, y = value)) +
+      geom_boxplot(color='blue')
+  }
+  else {
+    ggplot(data = df, aes(x=histo_var)) + geom_histogram() + xlab("X-variable")
+  }
+}
+
+
+## Running the boxplots of each variable to check variance
+# Simply change the vector of column names to get new results out
+make_plots(df = na.omit(remove_outliers_from_df(df[c('age', 'education.num')])), 
+           plottype = "box")
+```
+
+
+
+
+```{r}
+#running simple logs to check for assumptions
+library(regclass)
+df4 <- df3 %>% dplyr::select(c(income,age,fnlwgt,capital.gain,capital.loss,hours.per.week,workclass,marital.status,
+                        relationship,race,sex,native.country,degreeobtained))
+#education and occupation removed due to issues with perfect collinearity
+
+base<-glm(income~.,family="binomial",data=df4)
+summary(base)
+VIF(base)
+
+#high vif between marital status and relationship
+withmarital <- glm(income~age + fnlwgt + capital.gain + capital.loss + hours.per.week + workclass + marital.status + race + sex + native.country + degreeobtained,family="binomial",data=df4)
+summary(withmarital)
+VIF(withmarital)
+withrelationship <- glm(income~age + fnlwgt + capital.gain + capital.loss + hours.per.week + workclass + relationship + race + sex + native.country + degreeobtained,family="binomial",data=df4)
+summary(withrelationship)
+VIF(withrelationship)
+
+#marital status should be removed as relationship is more statistically significant
+
+df5 <- df3 %>% dplyr::select(c(income,age,fnlwgt,capital.gain,capital.loss,hours.per.week,workclass,relationship,race,sex,native.country,degreeobtained))
+```
+
+```{r}
+#testing interaction terms
+##adding interaction terms for relationship*age and workclass*capital.gain and capital.gain*capital.loss
+inter<-glm(income~age + fnlwgt + capital.loss + hours.per.week + workclass + relationship + race + sex + native.country + degreeobtained + relationship*age ,family="binomial",data=df5)
+summary(inter)
+VIF(inter)
+
+#those involving capital gain were removed due to issues with perfect collinearity, age relationship stays mostly statistically significant but does not have issues with VIF. Consider keeping
+
+```
+```{r}
+## JOE --> Not scaling the data results in one PC explaining all the variance.
+  ## PCA should almost always scale data, unless we're positive all variables are on the same scale.
+# PCA
+reduced <- df5[,2:6]
+pairs(reduced)
+
+pca.result<-prcomp(reduced,scale.=FALSE)
+pca.scores<-pca.result$x
+pairs(pca.scores)
+
+par(mfrow=c(1,2))
+eigenvals<-(pca.result$sdev)^2
+plot(1:5,eigenvals/sum(eigenvals),type="l",main="Scree Plot",ylab="Prop. Var. Explained")
+cumulative.prop<-cumsum(eigenvals/sum(eigenvals))
+plot(1:5,cumulative.prop,type="l",main="Cumulative proportion",ylim=c(0,1))
+
+#recommend use of PC 1 and 2 if PCA should be use
+
+
+
+# PCA helper function
+run_pca <- function(df, scale_data = TRUE){
+  if(scale_data) {
+    # Scale
+    df = as.data.frame(scale(df))
+  }
+    # Run the PCA
+    pca <- princomp(df)
+    screeplot(pca)
+    return(pca$loadings)
+}
+# Running Scaled PCA
+run_pca(reduced, scale = TRUE)
+```
+
+
+## JOE --> Using DF2 until I figure out why there's a row mismatch. Must look into that.
+## Clustering Analysis
+```{r}
+library(cluster)    # clustering algorithms
+library(factoextra) #  algos and viz
+library(klaR) # Kmodes analysis
+
+# Scale the data and start with a # of clusters
+clustering_df <- scale(df2[, 2:6])
+optimal_centers <- 6
+
+# Take results of PCA analysis and enter into this
+km_scaled <- kmeans(clustering_df, centers = optimal_centers)
+
+# Get the centers for plotting
+km_centers <- data.frame(cluster = factor(1:optimal_centers), km_scaled$centers)
+
+#Visualize the clusters
+fviz_cluster(km_scaled, data = clustering_df)
+
+# Calculating ideal # of clusters using elbow method
+wss <- function(k){
+   kmeans(clustering_df, k, nstart = 10)$tot.withinss
+}
+
+# Elbow Method shows 6 is the 'optimal' # of clusters
+k.values <- 3:9
+wss_values <- map_dbl(k.values, wss)
+plot(k.values, wss_values,
+     type = "b", pch = 19, frame =FALSE,
+     xlab = "Num Clusters of K",
+     ylab = "Total WSS")
+
+## Assign the clusters
+df2$cluster <- km_scaled$cluster
+```
+
+## Create train test split
+```{r}
+library(caret)
+
+#setting these to 1' and 0's is easier for me. When I kept it high and low with the levels I got and inverted ROC curve.
+# 1 is the target variable when income is high aka >50k
+df2$income <- ifelse(df2$income == "High", 1,0)
+df2$income <- as.factor(df2$income)
+
+test_index <- createDataPartition(df2$income, p=.3, list = FALSE)
+test <- df2[test_index,]
+
+table(test$income)
+
+train <- df2[-test_index,]
+
+table(train$income)
+prop.table(table(train$income))
+```
+
+# No Skill Prediction - No point of a classification model if it cannot outdo a simple majority class prediction
+```{r}
+noskill <- function(actuals, return_metric = "auc", print_proportion = TRUE){
+
+majority_class <- (as.data.frame(table(actuals))[as.data.frame(table(actuals))$Freq == 
+                             max(as.data.frame(table(actuals))$Freq), ])$actuals
+# Print if print is true
+if (print_proportion) {
+print(paste0("Majority class is: ", majority_class,
+" With ", round(100*(as.data.frame(table(actuals))[as.data.frame(table(actuals))$Freq == max(as.data.frame(table(actuals))$Freq), ])$Freq/sum(as.data.frame(table(actuals))$Freq),2),
+"% of the sample"))
+}
+  # Create the no skill prediction
+  noskill_pred <- c(rep(majority_class, length(actuals)))
+  # No skill accuracy
+  noskill_acc <- sum(noskill_pred == actuals) / length(actuals)
+  # No Skill AUC
+  noskill_auc <- performance(prediction(as.numeric(noskill_pred), as.numeric(actuals)), 
+              "auc")@y.values[[1]]
+  # Noskill_F1
+  noskill_f1 <- performance(prediction(as.numeric(noskill_pred), as.numeric(actuals)), 
+              "f")@y.values[[1]][2]
+  
+  if(return_metric == "auc"){
+    return(noskill_auc)
+  } 
+  else if (return_metric == "f1"){
+    return(noskill_f1)
+  }
+  else{
+    return(noskill_acc)
+  }
+}
+
+# Returning a no skill accuracy
+## Return_metric can be Accuracy (acc), AUC (auc) or F1 Score (f1)
+noskill_acc <- noskill(actuals = df2$income, return_metric = "acc", print_proportion = TRUE)
+
+```
+# Function to employ in the next steps: Finds the optimal cutoff given a probabilistic model like Logit
+```{r}
+optimal_cutoff <- function(probabilities, actuals, test_rng = seq(from = 0.4, to = 0.6, by = 0.01)){
+  cutoff_vals <- c()
+  aucs <- c()
+  for (cutoff in test_rng){
+    tmp_prob <- probabilities
+    tmp_prob[tmp_prob > cutoff] <- 1
+    # create prediction object
+    aucs <- append(aucs, performance(prediction(tmp_prob, actuals), "auc")@y.values[[1]])
+    cutoff_vals <- append(cutoff_vals, cutoff)
+  }
+  output_df <- data.frame(auc = aucs, cutoff = cutoff_vals)
+  return(output_df[which.max(output_df$auc), ]$cutoff)
+}
+
+## USAGE ##
+# test_over$Prediction[test_over$incomeProbability>  optimal_cutoff(probabilities = test_over$incomeProbability, actuals = test_over$Prediction) ] = 1
+```
+
+
+
+
+## Dealing with imbalanced data sets methods used over sampling, under sampling, mixture of both
+
+```{r}
+library(ROSE)
+#perform undersampleing. Essentially reduces the number of observations in the majority class income <50k | 0
+#calling '$data' extracts the datafram object nested in the ovun.sample object
+train_under <- ovun.sample(income ~ ., data = train, method = "under", seed = 1234)$data
+
+table(train_under$income)
+
+#perform oversampling. Essentially replicates observations from the minority class. Income >50k | 1
+train_over <- ovun.sample(income ~ ., data = train, method = "over", seed = 1234)$data
+
+table(train_over$income)
+
+#perform a mix of the two
+train_both <- ovun.sample(income ~ ., data = train, method = "both", seed = 1234)$data
+
+table(train_both$income)
+
+#now we have three data sets to compare results to. 
+#but which variables should we use?
+```
+
+##simple Logistic regression using age and education number and even sampling sampling distribution using mixture of both
+```{r}
+test_simple <- test 
+train_simple <- train_both
+
+model.simple <- glm(income ~  education.num + age, binomial(link = 'logit'), data = train_simple)
+
+#store predictions in object to use later
+fit.simple <- predict(model.simple, newdata = test_simple, type = "response")
+
+#store predictions in test_simpledf
+test_simple$incomeProbability <- fit.simple
+
+#create a prediction column in test_simple
+test_simple["Prediction"] = 0
+
+# if else statement at optimal cutoff
+test_simple$Prediction[test_simple$incomeProbability > optimal_cutoff(probabilities = test_simple$incomeProbability, actuals = test_simple$income)] <- 1
+
+#turn prediction value into factor
+test_simple$Prediction=as.factor(test_simple$Prediction)
+
+#confusion matrix: order  predicted classes, Reference
+cm.simple <- confusionMatrix(test_simple$Prediction, test_simple$income)
+
+results.lasso<-prediction(fit.simple, test_simple$income)
+roc.simple = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+```
+
+
+## Variable selection using undersampled
+```{r}
+library(glmnet)
+dat.train.x <- model.matrix(income~., train_under)
+#removes extra Intercept
+dat.train.x = dat.train.x[,-1]
+dat.train.y<-as.factor(train_under[,1])
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+
+#By Calling dat.train.x[,-1] above we should only have one intercept here
+coef(cvfit, s = "lambda.min")
+
+coef.u<-coef(cvfit,s='lambda.min',exact=TRUE)
+inds<-which(coef.u!=0)
+variables.u<-row.names(coef.u)[inds]
+variables.u<-variables.u[!(variables.u %in% '(Intercept)')]
+
+
+#CV misclassification error rate is little below .1
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model undersample, refit on test set
+#data set
+finalmodel.u<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+
+```
+
+
+## Variable selection using oversampled
+```{r}
+library(glmnet)
+dat.train.x <- model.matrix(income~., train_over)
+#removes extra Intercept
+dat.train.x = dat.train.x[,-1]
+dat.train.y<-train_over[,1]
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+
+#By Calling dat.train.x[,-1] above we should only have one intercept here
+coef(cvfit, s = "lambda.min")
+
+
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model over sample refit lasso using test set
+finalmodel.o<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+
+```
+
+
+
+## Variable selection using mix of both methods
+```{r}
+library(glmnet)
+dat.train.x <- model.matrix(income~., train_both)
+#removes extra Intercept
+dat.train.x = dat.train.x[,-1]
+
+dat.train.y<-train_both[,1]
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+
+#By Calling dat.train.x[,-1] above we should only have one intercept here
+coef(cvfit, s = "lambda.min")
+
+
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model mix of over/under  go ahead and refit lasso using test set
+#data set
+finalmodel.b<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+```
+
+#make Predictions using undersampled
+```{r}
+#all models are being compared to the same test set. This duplicates the test set for the under, over, both, sampling schemes
+test_under <- test
+
+dat.test.x <- model.matrix(income ~.,test_under)
+#removes extra intercept
+dat.test.x = dat.test.x[,-1] 
+
+#use final model from undersampled scheme
+fit.pred.lasso <- predict(finalmodel.u, newx = dat.test.x, type="response")
+
+#store lasso predicictions in test_under df as incomeProbability
+test_under$incomeProbability <- fit.pred.lasso
+
+#make prediction column to store the probabilities
+test_under["Prediction"] = 0
+
+# if else statement at optimal cutoff
+test_under$Prediction[test_under$incomeProbability>optimal_cutoff(probabilities = test_under$incomeProbability, actuals = test_under$income)] = 1
+
+#turn prediction value into factor
+test_under$Prediction=as.factor(test_under$Prediction)
+
+
+#Confusion matrix: order is -> predicted classes, Reference
+cm.under <- confusionMatrix(test_under$Prediction, test_under$income)
+
+results.lasso<-prediction(fit.pred.lasso, test_under$income)
+roc.lasso.u = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+```
+
+## Make Predictions using oversampled
+```{r}
+#all models are being compared to the same test set. This duplicates the test set for the under, over, both, sampling schemes
+test_over <- test
+
+dat.test.x <- model.matrix(income ~.,test_over)
+#removes extra intercept
+dat.test.x = dat.test.x[,-1] 
+
+#use finalmodel.o for oversampled scheme
+fit.pred.lasso <- predict(finalmodel.o, newx = dat.test.x, type="response")
+
+#store lasso predicictions in test_over df as incomeProbability
+test_over$incomeProbability <- fit.pred.lasso
+
+#make prediction column to store the probabilities
+test_over["Prediction"] = 0
+
+# if else statement at optimal cutoff
+test_over$Prediction[test_over$incomeProbability > 
+                       optimal_cutoff(probabilities = test_over$incomeProbability, actuals = test_over$income)] = 1
+
+#turn prediction value into factor
+test_over$Prediction=as.factor(test_over$Prediction)
+
+#Confusion matrix: order is -> predicted classes, Reference
+cm.over <- confusionMatrix(test_over$Prediction, test_over$income)
+
+results.lasso<-prediction(fit.pred.lasso, test_over$income)
+roc.lasso.o = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+```
+
+## Make Predictions using Mix of both sampling schemes
+```{r}
+#all models are being compared to the same test set. This duplicates the test set for the under, over, both, sampling schemes
+test_both <- test
+
+dat.test.x <- model.matrix(income ~.,test_both)
+#removes extra intercept
+dat.test.x = dat.test.x[,-1] 
+
+#use finalmodel.b for mix of both sampling schemes
+fit.pred.lasso <- predict(finalmodel.b, newx = dat.test.x, type="response")
+
+#store lasso predicictions in test_both df as incomeProbability
+test_both$incomeProbability <- fit.pred.lasso
+
+#make prediction column to store the probabilities
+test_both["Prediction"] = 0
+
+# if else statement at optimal cutoff
+test_both$Prediction[test_both$incomeProbability > 
+                       optimal_cutoff(probabilities = test_both$incomeProbability, actuals = test_both$income)] = 1
+
+#turn prediction value into factor
+test_both$Prediction=as.factor(test_both$Prediction)
+
+#cutoff <- 0.5
+#ifelse factorization based on cutoff 
+#test_both$Prediction = factor(ifelse(test_both$incomeProbability>cutoff, "High", "Low"), levels = c("High","Low"))
+
+
+#Confusion matrix: order is -> predicted classes, Reference
+cm.both <- confusionMatrix(test_both$Prediction, test_both$income)
+
+results.lasso<-prediction(fit.pred.lasso, test_both$income)
+roc.lasso.b = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+
+```
+
+## Decesion Tree Model
+```{r}
+library(rpart)
+library(rpart.plot)
+# reset train 
+train_under.DT <- ovun.sample(income ~ ., data = train_under, method = "under", seed = 1234)$data
+#duplicate test
+test_DT <- test_under
+
+#CP Default is 0.001
+DT.Model.u <- rpart(train_under.DT$income ~ ., data = train_under.DT, method = 'class', cp = .001)
+
+#list of Important Variables
+Imp.Vars <-varImp(DT.Model.u)
+#Print an image of of the decesion tree
+rpart.plot(DT.Model.u)
+
+#make Predictions from the DT model
+DT.predictions = predict(DT.Model.u, newdata = test_DT[,-1], type = 'class')
+
+#store Confusion Matrix Object of DT.
+cm.DT = confusionMatrix(DT.predictions, test_DT$income)
+cm.DT
+
+#store  predictions in test_DT 
+test_DT$Prediction <- DT.predictions
+
+#ROC goes here
+results.dt <- prediction(as.numeric(test_DT$Prediction), as.numeric(test_under$income))
+roc.dt = performance(results.dt, measure = "tpr", x.measure = "fpr")
+```
+
+
+## Random Forest Model
+```{r}
+# Testing a randomforest model!
+library(randomForest)
+
+f <- as.formula(income ~ .)
+
+compare_trees <- function(rng, mtry_rng = seq(2,4,1)){
+  acc <- c()
+  ntree <- c()
+  mtry <- c()
+  for (i in rng){
+    # The standard mtry for classification trees (default) is SQRT(p),
+    # Where p is the # of variables in the model
+    for (j in mtry_rng){
+    rf_regressor = randomForest(f,data = train, ntree = i, mtry = j)
+    test$yhat <- predict(rf_regressor, test)
+    acc <- append(acc, sum(test$yhat == test$Attrition) / nrow(test))
+    ntree <- append(ntree, i)  
+    mtry <- append(mtry, j)
+  }}
+  
+  return(data.frame(acc = acc, ntree = ntree, mtry = mtry))
+}
+
+# Timing this run for future tests
+system.time(trees <- compare_trees(rng = seq(50,55,1),
+                                   mtry_rng = seq(2,4,1) 
+                                   ))
+
+# Train the model
+rf_classifier <- randomForest(f, data = train, 
+                             ntree = trees[which.max(trees$acc), ]$ntree,
+                             mtry = trees[which.max(trees$acc), ]$mtry)
+
+# Predict and plot the predictions
+rf_pred <- predict(rf_classifier, test)
+
+# Showing the confusion Matrix 
+print("Confusion Matrix of Attrition Classification")
+confusionMatrix(table(rf_pred, test$income))
+
+# Cross validation of our dataset .How does it compare with our one-hoc RMSE?
+library(rfUtilities)
+rf.crossValidation(x = rf_classifier, xdata = train, 
+                   n = 10, bootstrap = TRUE,
+                   seed = 2021)
+
+# RF ROC 
+results.rf <- prediction(as.numeric(rf_pred), as.numeric(test$income))
+roc.rf = performance(results.rf, measure = "tpr", x.measure = "fpr")
+
+```
+
+
+
+
+
+## Model Comparisons
+```{r}
+cm.simple
+# accuracy 70.11, sensitive 70.35, Specificity 70.35
+
+cm.under
+# accuracy 80.48, sensitive 79.46, Specificity 83.53
+
+cm.over
+# accuracy 80.32, sensitive 79.21, Specificity 83.67
+
+cm.both
+# accuracy 80.35, sensitive 79.05, Specificity 84.29
+
+cm.DT
+
+
+#From sampling schemes only plotting the under method b/c it reflects true values in the data set and because they are all so close
+#collectively storing model sensitivities for plotting. 
+Sensitivities <- c(cm.simple$byClass["Sensitivity"], cm.under$byClass["Sensitivity"], cm.DT$byClass["Sensitivity"])
+
+Specificities <- c(cm.simple$byClass["Specificity"], cm.under$byClass["Specificity"], cm.DT$byClass["Specificity"])
+
+Precisions <- c(cm.simple$byClass["Precision"], cm.under$byClass["Precision"], cm.DT$byClass["Precision"])
+
+Recalls <- c(cm.simple$byClass["Recall"], cm.under$byClass["Recall"], cm.DT$byClass["Recall"])
+
+Accuracies <- c(cm.simple$overall[1], cm.under$overall[1], cm.DT$overall[1])
+
+Balanced_Accuracies <- c(cm.simple$byClass["Balanced Accuracy"], cm.under$byClass["Balanced Accuracy"], cm.DT$byClass["Balanced Accuracy"])
+
+F1_Scores <- c(cm.simple$byClass["F1"], cm.under$byClass["F1"], cm.DT$byClass["F1"])
+
+#create a data frame from metrics in CM and create vector of model names
+#model name vector
+Models <- c('Simple_LogReg', 'Lasso_LogReg', 'DT')
+
+Casestudy.Results <- data.frame(Models, Sensitivities,Specificities, Precisions, Recalls, Accuracies, Balanced_Accuracies, F1_Scores)
+
+Casestudy.Results
+
+
+Casestudy.Results$Sensitivities <- round(Casestudy.Results$Sensitivities,digits = 3)
+Casestudy.Results$Specificities <- round(Casestudy.Results$Specificities, digits = 3)
+Casestudy.Results$Precisions <- round(Casestudy.Results$Precisions, digits  = 3)
+Casestudy.Results$Recalls <- round(Casestudy.Results$Recalls, digits = 3)
+Casestudy.Results$F1_Scores <- round(Casestudy.Results$F1_Scores, digits=3)
+Casestudy.Results$Accuracies <- round(Casestudy.Results$Accuracies, digits= 3)
+Casestudy.Results$Balanced_Accuracies <- round(Casestudy.Results$Balanced_Accuracies, digits  = 3)
+
+
+sn.p <-Casestudy.Results %>% ggplot(aes(Models, Sensitivities, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=Sensitivities),vjust=3, size = 4) + ggtitle('Comparative Sensitivities') + xlab('') + ylab('')
+
+sp.p <-Casestudy.Results %>% ggplot(aes(Models, Specificities, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=Specificities),vjust=3, size = 4) + ggtitle('Comparative Specificities') + xlab('') + ylab('')
+
+pr.p <-Casestudy.Results %>% ggplot(aes(Models, Precisions, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=Precisions),vjust=3, size = 4) + ggtitle('Comparative Precisions') + xlab('') + ylab('')
+
+ba.p <- Casestudy.Results %>% ggplot(aes(Models, Balanced_Accuracies, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=Balanced_Accuracies),vjust=3, size = 4) + ggtitle('Comparative Balanced_Accuracies') + xlab('') + ylab('')
+
+f1.p <- Casestudy.Results %>% ggplot(aes(Models, F1_Scores, fill = Models)) + geom_bar(stat='identity', alpha = 0.5) + 
+  geom_text(aes(label=F1_Scores),vjust=3, size = 4) + ggtitle('Comparative F1_Scores') + xlab('') + ylab('')
+
+#sensitivity plot
+sn.p
+
+#specificity Plot
+sp.p
+
+#precision plot
+pr.p
+
+#balanced accuracies Plot
+ba.p
+
+#F1 Score plot
+f1.p
+```
+##ROC Curves
+```{r}
+# try this package too pROC This will give optimal cut off and display along the AUC graph
+# log.roc<-roc(response=test$Status,predictor=log.predprobs$Cancer,levels=c("Healthy","Cancer"))
+#plot(log.roc,print.thres="best")
+
+library(ROCR)
+plot(roc.simple, col = "red")
+plot(roc.lasso.u,col ="purple", add = T)
+plot(roc.lasso.o, col ="orange", add = T)
+plot(roc.lasso.b, col = "blue", add = T)
+plot(roc.dt, col = "green", add = T)
+plot(roc.rf, col = "black", add = T)
+legend("bottomright",legend=c("Simple","Under","Over","Mix of both", "DT", "RF"),col=c("red", "purple", "orange", "blue", "green", "black"),lty=1,lwd=1)
+
+```
+## ROC with pROC
+```{r}
+library(pROC)
+# try this package too pROC This will give optimal cut off and display along the AUC graph
+# log.roc<-roc(response=test$Status,predictor=log.predprobs$Cancer,levels=c("Healthy","Cancer"))
+#plot(log.roc,print.thres="best")
+
+lasso.roc.b <- roc(response = test_both$income, predictor = fit.pred.lasso)
+
+plot(lasso.roc.b, print.thres='best')
+
+#Optimal cutoff is 0.482
+
+#also note that this package readjus the x axis  but pretty neat. 
+```
+
+
