@@ -20,15 +20,20 @@ library(ROCR)
 ```{r echo=FALSE}
 #strip white space helps with the formatting of the 
 df <- read.csv("https://raw.githubusercontent.com/nedeinlein/AppliedStatsProject2/main/data_folder/adult.data.csv", strip.white = TRUE)
+
+
+#final test set to validate our model on. Don't run as our test set.
+val.df <- read.csv("https://raw.githubusercontent.com/nedeinlein/AppliedStatsProject2/main/data_folder/adult.test.csv", strip.white = TRUE)
 ```
 
 ## Create NA values from ? and factor variables
 ```{r echo=FALSE}
 # change  "?" to NA
 df[df=="?"]<-NA
+val.df[val.df=="?"]<-NA
 
 #check work
-colSums(is.na(df))
+sum(colSums(is.na(df)))
 
 #NA columns are workclass(1836), occupation(1843) and native.country(583) 
 
@@ -43,7 +48,7 @@ df$income <- factor((ifelse(df$income == ">50K","High","Low")), levels = c("Low"
 df[sapply(df,is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
 
 str(df)
-
+str(val.df)
 ```
 
 # Re-arrange columns of DF so that income is first followed by numeric cols then factor cols. This will help with model snytax later
@@ -64,17 +69,55 @@ df <- df %>% dplyr::select(income, age, fnlwgt, education.num, capital.gain, cap
 
 #currently we are just removing them and saying we have enough data no big deal. 
 ```{r}
+library(epiR)
 #count of NA group
 data.frame(sapply(df, function(y) sum(length(which(is.na(y))))))
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#     Before we filter out NA's Lets explore what if any impact this has if any
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+table(df$income)
+# un even target variable 
+# low (24720) 74.91% High (7841) 24.08%
+
+#count the number of rows with NA values
+sum(apply(df, 1, anyNA))
+# 2399 rows containin NA's
+
 
 #filter NA
 df2 <- df %>% filter(!is.na(workclass))
 df2 <- df2 %>% filter(!is.na(native.country))
 df2 <- df2 %>% filter(!is.na(occupation))
 
+
+
 #check of impact of filtering NA
-dim(df)
+dim(df) 
+#32561
 dim(df2)
+#30162   32561 - 2399 = 30162 checks out!
+
+table(df2$income)
+# low (22654) 75.1% High (7508) 24.9%
+
+# Not a huge impact on target variable. --- Is that all that Matters??? ---
+
+# one of two largest NA columns
+tab.NA.Workclass <- (table(is.na(df$workclass), df$income))
+#The odds of a  !NA workclass observation having low income is 0.35 times the odds of a NA class having low income
+#inverse: odds of NA worklclass having low income is 2.85 times the odds of a !NAclass
+
+# one of two largest NA columns
+tab.NA.Occupation <- (table(is.na(df$occupation), df$income))
+
+epi.2by2(tab.NA.Workclass, method = "cohort.count", conf.level = 0.95)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# I am unsure about the interpreataion of these results. But I think its important to understanding 
+# our approach to dealing with missing values rather just saying we have a lot of data so whatevs
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ```
 
 
@@ -149,9 +192,13 @@ make_cloud(wordcloud_df$native.country, txt_filters = c("united-states", "mexico
 ```{r}
 ## looking for correlations with GGally
 library(GGally)
-ggpairs(df2[, 1:7], aes(color = income, alpha = 0.4))
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Not super useful and takes a long time to run. commenting out until we need plot
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#ggpairs(df2[, 1:7], aes(color = income, alpha = 0.4))
 # Correlation Plot
-ggcorr(df2[, 1:7])
+#ggcorr(df2[, 1:7])
 
 ```
 
@@ -414,6 +461,8 @@ library(caret)
 # 1 is the target variable when income is high aka >50k
 df2$income <- ifelse(df2$income == "High", 1,0)
 df2$income <- as.factor(df2$income)
+
+df2 <- df2 %>% select(-c(education))
 
 test_index <- createDataPartition(df2$income, p=.3, list = FALSE)
 test <- df2[test_index,]
