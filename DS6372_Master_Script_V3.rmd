@@ -344,6 +344,12 @@ run_pca <- function(df, scale_data = TRUE){
 }
 # Running Scaled PCA
 run_pca(reduced, scale = TRUE)
+
+#could add PCs to master df but might fuck up lasso so i'll make another one
+df.pca <- data.frame(cbind(df2, pca.scores))
+
+#scatter plot of PC1 v PC2 Hue income
+ggplot(data = df.pca, aes(x=PC1, y=PC2)) + geom_point(aes(col=income)) + ggtitle("PCA of Income")
 ```
 
 ## Clustering Analysis
@@ -472,11 +478,13 @@ test_both <- ovun.sample(income ~ ., data = test, method = "both", seed = 1234)$
 #but which variables should we use?
 ```
 
-## LOGIT creation function
+## LOGIT creation function 
+
+## note to good joe: should we use under/over or both for simple logReg for consistency?
 ```{r}
 create_logit <- function(f, train, test, return_roc = TRUE){
   # Create the model and prediction column
-  mdl <- glm(f, binomial(link = 'logit'), data = train)
+  mdl <- glm(f, binomial(link = 'logit'), data = train) # should we use under sampled for consistency
   test$p <- predict(mdl, newdata = test, type = "response")
   test['Prediction'] <- 0
   
@@ -499,8 +507,10 @@ create_logit <- function(f, train, test, return_roc = TRUE){
 }
 
 f <- as.formula(income ~ education.num + age)
-simple_logit_roc <- create_logit(f = f, train = train, test = test, return_roc = TRUE)
+simple_logit_roc <- create_logit(f = f, train = train, test = test, return_roc = TRUE) # should we use the undersampled df?
 cm.simple <- create_logit(f = f, train = train, test = test, return_roc = FALSE)
+
+
 ```
 
 ## LASSO creation function
