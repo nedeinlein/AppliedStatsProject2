@@ -77,6 +77,15 @@ df2 <- df %>% filter(!is.na(workclass))
 df2 <- df2 %>% filter(!is.na(native.country))
 df2 <- df2 %>% filter(!is.na(occupation))
 
+#graphic of missing information
+mis <- df %>% filter(is.na(workclass))
+mis2 <-df %>% filter(is.na(occupation))
+mis3 <- df %>% filter(is.na(native.country))
+allmis <- rbind(mis,mis2,mis3)
+df %>% ggplot(aes(x=income, fill = income)) + geom_bar(title = )
+allmis %>% ggplot(aes(x=income, fill = income)) + geom_bar()
+df2 %>% ggplot(aes(x=income, fill = income)) + geom_bar()
+
 #check of impact of filtering NA
 dim(df)
 dim(df2)
@@ -241,7 +250,7 @@ df5 <- df3 %>% select(c(income,age,fnlwgt,capital.gain,capital.loss,hours.per.we
 ```{r}
 #testing interaction terms
 ##adding interaction terms for relationship*age and workclass*capital.gain and capital.gain*capital.loss
-inter<-glm(income~age + fnlwgt + capital.loss + hours.per.week + workclass + relationship + race + sex + native.country + degreeobtained + relationship*age ,family="binomial",data=df5)
+inter<-glm(income~age + fnlwgt + capital.gain + capital.loss + hours.per.week + workclass + relationship + race + sex + native.country + degreeobtained + relationship*age ,family="binomial",data=df5)
 summary(inter)
 VIF(inter)
 
